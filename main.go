@@ -7,11 +7,9 @@ import (
 	"os"
 
 	"github.com/juju/cmd"
-	"github.com/juju/loggo"
 )
 
 func main() {
-	loggo.GetLogger("juju").SetLogLevel(loggo.DEBUG)
 	ctx, err := cmd.DefaultContext()
 	if err != nil {
 		logger.Errorf("%v", err)

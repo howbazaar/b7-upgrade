@@ -6,7 +6,7 @@ Upgrade from beta 7
 1. copy b7-upgrade binary to controller machine 0
 1. run `b7-upgrade verify-db`
   - this will use credentails in the agent configuration to connect to the database
-  - will list all models, along with the machines and units in those models
+  - will list all models, along with the machines in those models
 1. run `b7-upgrade distribute-upgrader`
   - this will make sure a copy of the upgrader binary is on every host (and container)
 1. run `b7-upgrade shutdown-agents`
