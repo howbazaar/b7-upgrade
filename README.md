@@ -31,6 +31,22 @@ Upgrade from beta 7
 
 ## Database changes
 
+`git diff juju-2.0-beta7 -- state`
+
+ * new controller config
+ * new controllerUsers collection
+ * new clouds collection
+ * new cloudsCredentails collection
+ * new globalSetings collection
+ * permissions collection added
+ * services collection renamed to application
+ * units collection index changed s/service/application/
+ * refcounts collection added
+ * relations index changed s/service/application/
+ * status history index changed, added "updated" field
+
+
+
 TODO
 
 ## Xenial agent startup script changes
