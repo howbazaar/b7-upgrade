@@ -17,10 +17,11 @@ var logger = loggo.GetLogger("b7-upgrade")
 
 type upgrade struct {
 	live   bool
-	action func(*cmd.Context, bool) error
+	action func(*cmd.Context) error
 
 	debug  bool
 	jdebug bool
+	args   []string
 }
 
 const helpDoc = `
@@ -55,31 +56,35 @@ func (c *upgrade) SetFlags(f *gnuflag.FlagSet) {
 // Init implements Command.
 func (c *upgrade) Init(args []string) error {
 	if len(args) == 0 {
-		return errors.Errorf("missing action, options are: %s", strings.Join(validCommands(), ", "))
+		return errors.Errorf("missing action, options are: %s", c.validCommands())
 	}
 	var action string
 	action, args = args[0], args[1:]
-	if f, found := commands[action]; !found {
-		return errors.Errorf("unknown action, options are: %s", strings.Join(validCommands(), ", "))
+	if f, found := c.commands()[action]; !found {
+		return errors.Errorf("unknown action, options are: %s", c.validCommands())
 	} else {
 		c.action = f
 	}
-	return cmd.CheckEmpty(args)
+	c.args = args
+	return nil
 }
 
-func validCommands() []string {
+func (c *upgrade) validCommands() string {
 	var result []string
-	for name := range commands {
+	for name := range c.commands() {
 		result = append(result, name)
 	}
 	sort.Strings(result)
-	return result
+	return strings.Join(result, ", ")
 }
 
-var commands = map[string]func(ctx *cmd.Context, live bool) error{
-	"verify-db":           verifyDB,
-	"distribute-upgrader": distributeUpgrader,
-	"client":              client,
+func (c *upgrade) commands() map[string]func(ctx *cmd.Context) error {
+	return map[string]func(ctx *cmd.Context) error{
+		"verify-db":           c.verifyDB,
+		"distribute-upgrader": c.distributeUpgrader,
+		"client":              c.client,
+		"agents":              c.agents,
+	}
 }
 
 // Run implements Command.
@@ -97,5 +102,5 @@ func (c *upgrade) Run(ctx *cmd.Context) error {
 		ctx.Infof("Running dry-run")
 	}
 
-	return c.action(ctx, c.live)
+	return c.action(ctx)
 }

@@ -21,6 +21,12 @@ type Machine struct {
 	Address string
 }
 
+type FlatMachine struct {
+	Model   string
+	Tag     names.MachineTag
+	Address string
+}
+
 func openBeta7DB() (*state.State, error) {
 	config, err := getConfig()
 	if err != nil {
@@ -42,6 +48,29 @@ func openBeta7DB() (*state.State, error) {
 			stateenvirons.GetNewEnvironFunc(environs.New),
 		),
 	)
+}
+
+func getServerMachine(st *state.State) (FlatMachine, error) {
+	var empty FlatMachine
+	model, err := st.Model()
+	if err != nil {
+		return empty, err
+	}
+
+	machine, err := st.Machine("0")
+	if err != nil {
+		return empty, err
+	}
+	addr, err := machine.PublicAddress()
+	if err != nil {
+		return empty, errors.Trace(err)
+	}
+
+	return FlatMachine{
+		Model:   model.Name(),
+		Tag:     machine.MachineTag(),
+		Address: addr.Value,
+	}, nil
 }
 
 // returns ip addresses
@@ -82,5 +111,45 @@ func getMachines(st *state.State) ([]Model, error) {
 		result = append(result, m)
 	}
 
+	return result, nil
+}
+
+func getAllMachines(st *state.State) ([]FlatMachine, error) {
+	models, err := getMachines(st)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	var result []FlatMachine
+	for _, model := range models {
+		for _, machine := range model.Machines {
+			result = append(result, FlatMachine{
+				Model:   model.Name,
+				Tag:     machine.Tag,
+				Address: machine.Address,
+			})
+		}
+	}
+	return result, nil
+}
+
+// returns ip addresses
+func getOtherMachines(st *state.State) ([]FlatMachine, error) {
+	models, err := getMachines(st)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	var result []FlatMachine
+	for _, model := range models {
+		for _, machine := range model.Machines {
+			if model.Name == "admin" && machine.Tag == names.NewMachineTag("0") {
+				continue
+			}
+			result = append(result, FlatMachine{
+				Model:   model.Name,
+				Tag:     machine.Tag,
+				Address: machine.Address,
+			})
+		}
+	}
 	return result, nil
 }

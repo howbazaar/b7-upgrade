@@ -5,6 +5,6 @@ import (
 	"github.com/juju/errors"
 )
 
-func client(ctx *cmd.Context, live bool) error {
+func (c *upgrade) client(ctx *cmd.Context) error {
 	return errors.NotImplementedf("client")
 }

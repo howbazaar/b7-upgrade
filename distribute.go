@@ -24,7 +24,10 @@ type DistResults struct {
 
 // distributeUpgrader will copy the b7-upgrade executable
 // to each machine, and put it in /var/lib/juju.
-func distributeUpgrader(ctx *cmd.Context, live bool) error {
+func (c *upgrade) distributeUpgrader(ctx *cmd.Context) error {
+	if len(c.args) > 0 {
+		return errors.Errorf("unexpected args: %v", c.args)
+	}
 
 	// NOTE: how to we skip doing our own machines?
 	// Perhaps just brute force it and skip admin/0.
@@ -35,7 +38,7 @@ func distributeUpgrader(ctx *cmd.Context, live bool) error {
 	}
 	defer st.Close()
 
-	models, err := getMachines(st)
+	machines, err := getOtherMachines(st)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -49,24 +52,19 @@ func distributeUpgrader(ctx *cmd.Context, live bool) error {
 		lock    sync.Mutex
 	)
 
-	ctx.Infof("Models and Machines:")
-	for _, model := range models {
-		for _, machine := range model.Machines {
-			if model.Name == "admin" && machine.Tag == names.NewMachineTag("0") {
-				continue
-			}
-			wg.Add(1)
-			go func(model string, machine Machine) {
-				defer wg.Done()
-				result := CopyToMachine(live, fileLocation, "/var/lib/juju/b7-upgrade", machine.Address)
-				result.Model = model
-				result.Machine = machine.Tag
-				lock.Lock()
-				defer lock.Unlock()
-				results = append(results, result)
-			}(model.Name, machine)
-		}
+	for _, machine := range machines {
+		wg.Add(1)
+		go func(machine FlatMachine) {
+			defer wg.Done()
+			result := CopyToMachine(c.live, fileLocation, "/var/lib/juju/b7-upgrade", machine.Address)
+			result.Model = machine.Model
+			result.Machine = machine.Tag
+			lock.Lock()
+			defer lock.Unlock()
+			results = append(results, result)
+		}(machine)
 	}
+
 	ctx.Infof("Waiting for copies for finish")
 	wg.Wait()
 
