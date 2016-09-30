@@ -84,6 +84,7 @@ func (c *upgrade) commands() map[string]func(ctx *cmd.Context) error {
 		"distribute-upgrader": c.distributeUpgrader,
 		"client":              c.client,
 		"agents":              c.agents,
+		"upgrade-db":          c.upgradeDB,
 	}
 }
 

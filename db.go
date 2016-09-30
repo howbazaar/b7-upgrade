@@ -1,8 +1,13 @@
 package main
 
 import (
+	"github.com/juju/cmd"
 	"github.com/juju/errors"
+	jujutxn "github.com/juju/txn"
+	"github.com/juju/utils/set"
 	"gopkg.in/juju/names.v2"
+	"gopkg.in/mgo.v2"
+	"gopkg.in/mgo.v2/txn"
 
 	"github.com/juju/juju/environs"
 	"github.com/juju/juju/mongo"
@@ -25,6 +30,99 @@ type FlatMachine struct {
 	Model   string
 	Tag     names.MachineTag
 	Address string
+}
+
+type database struct {
+	session     *mgo.Session
+	jujuDB      *mgo.Database
+	collections set.Strings
+}
+
+func NewDatabase() (_ *database, err error) {
+	session, err := openSession()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	defer func() {
+		if err != nil {
+			session.Close()
+		}
+	}()
+
+	jujuDB := session.DB("juju")
+
+	collections, err := jujuDB.CollectionNames()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	db := &database{
+		session:     session,
+		jujuDB:      jujuDB,
+		collections: set.NewStrings(collections...),
+	}
+	return db, nil
+}
+
+func (db *database) Close() {
+	db.session.Close()
+	db.session = nil
+	db.jujuDB = nil
+	db.collections = nil
+}
+
+func (db *database) GetCollection(name string) *mgo.Collection {
+	return db.jujuDB.C(name)
+}
+
+func (db *database) TransactionRunner(ctx *cmd.Context, live bool) jujutxn.Runner {
+	params := jujutxn.RunnerParams{Database: db.jujuDB}
+	runner := jujutxn.NewRunner(params)
+	return &liveRunner{ctx: ctx, live: live, runner: runner}
+}
+
+type liveRunner struct {
+	jujutxn.Runner
+
+	ctx    *cmd.Context
+	live   bool
+	runner jujutxn.Runner
+}
+
+// Only supports the RunTransaction method, all others panic.
+func (r *liveRunner) RunTransaction(ops []txn.Op) error {
+	if r.live {
+		return r.runner.RunTransaction(ops)
+	}
+	r.ctx.Infof("RunTransaction: \n%#v", ops)
+	return nil
+}
+
+func openSession() (*mgo.Session, error) {
+	config, err := getConfig()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	info, ok := config.MongoInfo()
+	if !ok {
+		return nil, errors.New("no state info available")
+	}
+
+	session, err := mongo.DialWithInfo(info.Info, mongo.DefaultDialOpts())
+	if err != nil {
+		return nil, errors.Annotate(err, "cannot connect to mongodb")
+	}
+	logger.Debugf("connection established")
+
+	admin := session.DB("admin")
+	if err := admin.Login(info.Tag.String(), info.Password); err != nil {
+		session.Close()
+
+		return nil, errors.Annotatef(err, "cannot log in to admin database as %q", info.Tag.String())
+	}
+	return session, nil
 }
 
 func openBeta7DB() (*state.State, error) {
