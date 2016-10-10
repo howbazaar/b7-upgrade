@@ -65,3 +65,16 @@ type ModelDoc struct {
 	// found while checking streams for new versions.
 	LatestAvailableTools string `bson:"available-tools,omitempty"`
 }
+
+type SettingsDoc struct {
+	DocID     string `bson:"_id"`
+	ModelUUID string `bson:"model-uuid"`
+
+	// Settings contains the settings. This must not be
+	// omitempty, or migration cannot work correctly.
+	Settings map[string]interface{} `bson:"settings"`
+
+	// Version is a version number for the settings,
+	// and is increased every time the settings change.
+	Version int64 `bson:"version"`
+}
