@@ -47,17 +47,17 @@ Upgrade from beta 7
 
 Database collections Updated
 
-./annotations.bson
+* ./annotations.bson
   - everything in the annotations collection are application settings
   - need to change from service global key to appliction global key
-./controllers.bson
-./models.bson
-./services.bson
-./sequence.bson
-./units.bson
+* ./controllers.bson
+* ./models.bson
+* ./services.bson
+* ./sequence.bson
+* ./units.bson
  - remote "ports", "privateaddress", "publicaddress"
  - rename "service" to "application"
-./usermodelname.bson
+* ./usermodelname.bson
 
 Prechecks needed
 
