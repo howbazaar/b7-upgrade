@@ -61,29 +61,29 @@ Database collections Updated
 
 Prechecks needed
 
-./assignUnits.bson - should be empty
-./cleanups.bson - should be empty
-./migrations.bson - should be empty
-./ipaddresses.bson - should be empty
+* ./assignUnits.bson - should be empty
+* ./cleanups.bson - should be empty
+* ./migrations.bson - should be empty
+* ./ipaddresses.bson - should be empty
 
 Database collections Checked and Unchanged
-./actionnotifications.bson
-./actions.bson
-./bakeryStorageItems.bson - is empty
-./blockdevices.bson
-./charms.bson
-./containerRefs.bson
-./filesystems.bson
-./guimetadata.bson
-./guisettings.bson
-./instanceData.bson
-./openedPorts.bson
-./spaces.bson
-./relationscopes.bson
-./volumes.bson
+* ./actionnotifications.bson
+* ./actions.bson
+* ./bakeryStorageItems.bson - is empty
+* ./blockdevices.bson
+* ./charms.bson
+* ./containerRefs.bson
+* ./filesystems.bson
+* ./guimetadata.bson
+* ./guisettings.bson
+* ./instanceData.bson
+* ./openedPorts.bson
+* ./relationscopes.bson
+* ./spaces.bson
+* ./volumes.bson
 
 Postchecks needed
-./ip.addresses.bson
+* ./ip.addresses.bson
  - I think that the instance poller and machine agents
    will update the ip addresses properly. Need to check
    how the update queries and replaces, but the keys seem
@@ -91,52 +91,48 @@ Postchecks needed
 
 
 Database collections TODO
-./cloudimagemetadata.bson
+* ./cloudimagemetadata.bson
  - now global, strip uuid from the front
  - remote "model-uuid" value
-./constraints.bson
+* ./constraints.bson
  - uses global key, so needs remove / add with new key
-./endpointbindings.bson
+* ./endpointbindings.bson
  - uses global key, so needs remove / add with new key
  - remove "env-uuid"
-./leases.bson
+* ./leases.bson
  - "service-leadership" namespace removenamed to "application-leadership"
-./linklayerdevices.bson
-./linklayerdevicesrefs.bson
-./machines.bson
+* ./linklayerdevices.bson
+* ./linklayerdevicesrefs.bson
+* ./machines.bson
  - supported containers remove "lxc"
-./managedStoredResources.bson
-./meterStatus.bson
-./metricsmanager.bson
-./modelEntityRefs.bson
-./modelUserLastConnection.bson
-./modelusers.bson
-./relations.bson
+* ./managedStoredResources.bson
+* ./meterStatus.bson
+* ./metricsmanager.bson
+* ./modelEntityRefs.bson
+* ./modelUserLastConnection.bson
+* ./modelusers.bson
+* ./relations.bson
  - in endpoints, "servicename" -> "applicationname"
-./resources.bson
+* ./resources.bson
  - remove "env-uuid"
  - rename "service-id" -> "application-id"
-./settings.bson
+* ./settings.bson
  - need to remove a bunch of settings from model settings
    - maas-oauth, maas-server -> some cloud settings
    - all  "<uuid>:s#.*" ->  "<uuid>:a#.*"
 
-./settingsrefs.bson
-./sshhostkeys.bson
-./statuses.bson
-./statuseshistory.bson
-./storageattachments.bson
-./storageconstraints.bson
-./storageinstances.bson
-./storedResources.bson
-./subnets.bson
-./toolsmetadata.bson
-./txns.bson
-./txns.log.bson
-./txns.prune.bson
-./txns.stash.bson
-./userLastLogin.bson
-./users.bson
+* ./settingsrefs.bson
+* ./sshhostkeys.bson
+* ./statuses.bson
+* ./statuseshistory.bson
+* ./storageattachments.bson
+* ./storageconstraints.bson
+* ./storageinstances.bson
+* ./storedResources.bson
+* ./subnets.bson
+* ./toolsmetadata.bson
+* ./userLastLogin.bson
+* ./users.bson
  - remove "deactivated"
 
 
