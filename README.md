@@ -50,8 +50,22 @@ Database collections Updated
 * ./annotations.bson
   - everything in the annotations collection are application settings
   - need to change from service global key to appliction global key
+* ./constraints.bson
+ - uses global key, so needs remove / add with new key
 * ./controllers.bson
+* ./endpointbindings.bson
+ - uses global key, so needs remove / add with new key
+ - remove "env-uuid"
+* ./leases.bson
+ - "service-leadership" namespace removenamed to "application-leadership"
 * ./models.bson
+* ./modelEntityRefs.bson
+  - rename "services" -> "applications"
+* ./relations.bson
+ - in endpoints, "servicename" -> "applicationname"
+* ./resources.bson
+ - remove "env-uuid"
+ - rename "service-id" -> "application-id"
 * ./services.bson
 * ./sequence.bson
 * ./units.bson
@@ -77,9 +91,16 @@ Database collections Checked and Unchanged
 * ./guimetadata.bson
 * ./guisettings.bson
 * ./instanceData.bson
+* ./linklayerdevices.bson
+  - current machines won't have the bridges that juju now creates
+* ./linklayerdevicesrefs.bson
+* ./meterStatus.bson
+* ./metricsmanager.bson
+* ./modelUserLastConnection.bson
 * ./openedPorts.bson
 * ./relationscopes.bson
 * ./spaces.bson
+* ./userLastLogin.bson
 * ./volumes.bson
 
 Postchecks needed
@@ -94,28 +115,20 @@ Database collections TODO
 * ./cloudimagemetadata.bson
  - now global, strip uuid from the front
  - remote "model-uuid" value
-* ./constraints.bson
- - uses global key, so needs remove / add with new key
-* ./endpointbindings.bson
- - uses global key, so needs remove / add with new key
- - remove "env-uuid"
-* ./leases.bson
- - "service-leadership" namespace removenamed to "application-leadership"
-* ./linklayerdevices.bson
-* ./linklayerdevicesrefs.bson
+
+
 * ./machines.bson
  - supported containers remove "lxc"
 * ./managedStoredResources.bson
-* ./meterStatus.bson
-* ./metricsmanager.bson
-* ./modelEntityRefs.bson
-* ./modelUserLastConnection.bson
+ - need to add reference to the 2.0-rc/ga version
+
+
 * ./modelusers.bson
-* ./relations.bson
- - in endpoints, "servicename" -> "applicationname"
-* ./resources.bson
- - remove "env-uuid"
- - rename "service-id" -> "application-id"
+  - remove "access"
+  - add "object-uuid" which is a copy of "model-uuid"
+
+
+
 * ./settings.bson
  - need to remove a bunch of settings from model settings
    - maas-oauth, maas-server -> some cloud settings
@@ -130,8 +143,10 @@ Database collections TODO
 * ./storageinstances.bson
 * ./storedResources.bson
 * ./subnets.bson
+ - "providerid" has uuid: prefix which needs to be removed.
 * ./toolsmetadata.bson
-* ./userLastLogin.bson
+ - tools structure hasn't changed, but need to add a reference
+   for the 2.0 rc/ga tools.
 * ./users.bson
  - remove "deactivated"
 

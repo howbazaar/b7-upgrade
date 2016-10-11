@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"gopkg.in/juju/names.v2"
 )
 
 const ServiceTagKind = "service"
@@ -76,7 +78,7 @@ func splitTag(tag string) (string, string, error) {
 }
 
 // ParseTag parses a string representation into a Tag.
-func ParseTag(tag string) (Tag, error) {
+func ParseTag(tag string) (names.Tag, error) {
 	kind, id, err := splitTag(tag)
 	if err != nil {
 		return nil, invalidTagError(tag, "")
