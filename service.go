@@ -11,7 +11,7 @@ import (
 
 func (c *upgrade) agents(ctx *cmd.Context) error {
 	if len(c.args) == 0 {
-		return errors.Errorf("missing action: [status, stop, start-server, start-others]")
+		return errors.Errorf("missing action: [status, stop, start-controller, start-others]")
 	}
 	if len(c.args) > 1 {
 		return errors.Errorf("unexpected args: %v", c.args[1:])
@@ -26,7 +26,7 @@ func (c *upgrade) agents(ctx *cmd.Context) error {
 	switch c.args[0] {
 	case "stop":
 		return c.stopAgents(ctx, st)
-	case "start-server":
+	case "start-controller":
 		return c.startServer(ctx, st)
 	case "start-others":
 		return c.startAgents(ctx, st)

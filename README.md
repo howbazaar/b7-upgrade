@@ -7,23 +7,19 @@ Upgrade from beta 7
 1. run `b7-upgrade verify-db`
   - this will use credentails in the agent configuration to connect to the database
   - will list all models, along with the machines in those models
-1. run `b7-upgrade distribute-upgrader`
-  - this will make sure a copy of the upgrader binary is on every host (and container)
-1. run `b7-upgrade shutdown-agents`
+1. run `b7-upgrade agents stop`
   - this will shutdown every juju agent
-1. run `b7-upgrade migrate-db`
+1. run `b7-upgrade upgrade-db`
   - this will run upgrade steps for each database change
 
-1. run `b7-upgrade upgrade-agents`
+1. run `b7-upgrade upgrade-agents <path to 2.0 tools tgz>`
   - this will the jujud-2.0 binary to each agent and set appropriate symlinks in the agent tools dirs
   - it will also update the agent.conf version tag, upgradeToVersion value, and add controller tag
 
-1. run `b7-upgrade start-controller`
+1. run `b7-upgrade agents start-controller`
 
-
-1. run `b7-upgrade start-agents`
+1. run `b7-upgrade agents start-others`
   - this will start every other juju agent
-1. run `b7-upgrade start-agents`
 
 
 # Changes from beta 7 to rc 2
