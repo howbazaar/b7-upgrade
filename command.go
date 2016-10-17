@@ -4,6 +4,7 @@
 package main
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -85,6 +86,7 @@ func (c *upgrade) commands() map[string]func(ctx *cmd.Context) error {
 		"client":              c.client,
 		"agents":              c.agents,
 		"upgrade-db":          c.upgradeDB,
+		"upgrade-agents":      c.upgradeAgents,
 	}
 }
 
@@ -103,5 +105,9 @@ func (c *upgrade) Run(ctx *cmd.Context) error {
 		ctx.Infof("Running dry-run")
 	}
 
-	return c.action(ctx)
+	err := c.action(ctx)
+	if err != nil {
+		fmt.Fprintf(ctx.Stderr, "error: %v\n\n%s", err, errors.ErrorStack(err))
+	}
+	return err
 }

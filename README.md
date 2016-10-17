@@ -13,14 +13,13 @@ Upgrade from beta 7
   - this will shutdown every juju agent
 1. run `b7-upgrade migrate-db`
   - this will run upgrade steps for each database change
-1. run `b7-upgrade upgrade-controller`
-  - this will the jujud-2.0 binary is set for the controller machine and set appropriate symlinks in the agent tools dirs
-  - it will also update the agent.conf version tag, upgradeToVersion value, and add controller tag
-1. run `b7-upgrade start-controller`
 
 1. run `b7-upgrade upgrade-agents`
   - this will the jujud-2.0 binary to each agent and set appropriate symlinks in the agent tools dirs
   - it will also update the agent.conf version tag, upgradeToVersion value, and add controller tag
+
+1. run `b7-upgrade start-controller`
+
 
 1. run `b7-upgrade start-agents`
   - this will start every other juju agent

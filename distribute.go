@@ -10,17 +10,7 @@ import (
 	"github.com/juju/cmd"
 	"github.com/juju/errors"
 	"github.com/juju/utils/ssh"
-	"gopkg.in/juju/names.v2"
 )
-
-type DistResults struct {
-	Model   string
-	Machine names.MachineTag
-	Error   error
-	Code    int
-	Stdout  string
-	Stderr  string
-}
 
 // distributeUpgrader will copy the b7-upgrade executable
 // to each machine, and put it in /var/lib/juju.
@@ -28,9 +18,6 @@ func (c *upgrade) distributeUpgrader(ctx *cmd.Context) error {
 	if len(c.args) > 0 {
 		return errors.Errorf("unexpected args: %v", c.args)
 	}
-
-	// NOTE: how to we skip doing our own machines?
-	// Perhaps just brute force it and skip admin/0.
 
 	st, err := openDBusingState()
 	if err != nil {
