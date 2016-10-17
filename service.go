@@ -17,7 +17,7 @@ func (c *upgrade) agents(ctx *cmd.Context) error {
 		return errors.Errorf("unexpected args: %v", c.args[1:])
 	}
 
-	st, err := openBeta7DB()
+	st, err := openDBusingState()
 	if err != nil {
 		return errors.Trace(err)
 	}

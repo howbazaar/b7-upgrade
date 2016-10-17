@@ -34,14 +34,19 @@ Upgrade from beta 7
 `git diff juju-2.0-beta7 -- state`
 
  * new controller config
+   - added when updating controller
  * new controllerUsers collection
  * new clouds collection
+   - added when updating controller
  * new cloudsCredentails collection
+   - added when updating controller
  * new globalSetings collection
+   - empty in both, but need to create one
  * permissions collection added
  * services collection renamed to application
  * units collection index changed s/service/application/
  * refcounts collection added
+   - refcounts set when renaming service -> application
  * relations index changed s/service/application/
  * status history index changed, added "updated" field
 
@@ -50,6 +55,9 @@ Database collections Updated
 * ./annotations.bson
   - everything in the annotations collection are application settings
   - need to change from service global key to appliction global key
+* ./cloudimagemetadata.bson
+ - now global, strip uuid from the front
+ - remote "model-uuid" value
 * ./constraints.bson
  - uses global key, so needs remove / add with new key
 * ./controllers.bson
@@ -58,9 +66,14 @@ Database collections Updated
  - remove "env-uuid"
 * ./leases.bson
  - "service-leadership" namespace removenamed to "application-leadership"
+* ./machines.bson
+ - supported containers remove "lxc"
 * ./models.bson
 * ./modelEntityRefs.bson
   - rename "services" -> "applications"
+* ./modelusers.bson
+  - remove "access"
+  - add "object-uuid" which is a copy of "model-uuid"
 * ./relations.bson
  - in endpoints, "servicename" -> "applicationname"
 * ./resources.bson
@@ -68,17 +81,35 @@ Database collections Updated
  - rename "service-id" -> "application-id"
 * ./services.bson
 * ./sequence.bson
+* ./settings.bson
+ - need to remove a bunch of settings from model settings
+   - maas-oauth, maas-server -> some cloud settings
+   - all  "<uuid>:s#.*" ->  "<uuid>:a#.*"
+* ./settingsrefs.bson
+ - all refcounts moved to the new refcounts collection.
+* ./statuses.bson
+ - uses global key, so needs remove / add with new key
+* ./statuseshistory.bson
+ - globalkey change
+* ./storageconstraints.bson
+ - key changed from 's#' -> 'asc#' with charm too
+* ./subnets.bson
+ - "providerid" has uuid: prefix which needs to be removed.
 * ./units.bson
  - remote "ports", "privateaddress", "publicaddress"
  - rename "service" to "application"
 * ./usermodelname.bson
+* ./users.bson
+ - remove "deactivated"
 
-Prechecks needed
+Prechecks done
 
 * ./assignUnits.bson - should be empty
 * ./cleanups.bson - should be empty
 * ./migrations.bson - should be empty
 * ./ipaddresses.bson - should be empty
+* ./storageinstances.bson
+ - did change slightly, but no current use, so check empty
 
 Database collections Checked and Unchanged
 * ./actionnotifications.bson
@@ -99,7 +130,10 @@ Database collections Checked and Unchanged
 * ./modelUserLastConnection.bson
 * ./openedPorts.bson
 * ./relationscopes.bson
+* ./sshhostkeys.bson
 * ./spaces.bson
+* ./storageattachments.bson
+* ./storedResources.bson
 * ./userLastLogin.bson
 * ./volumes.bson
 
@@ -112,43 +146,13 @@ Postchecks needed
 
 
 Database collections TODO
-* ./cloudimagemetadata.bson
- - now global, strip uuid from the front
- - remote "model-uuid" value
 
-
-* ./machines.bson
- - supported containers remove "lxc"
 * ./managedStoredResources.bson
  - need to add reference to the 2.0-rc/ga version
 
-
-* ./modelusers.bson
-  - remove "access"
-  - add "object-uuid" which is a copy of "model-uuid"
-
-
-
-* ./settings.bson
- - need to remove a bunch of settings from model settings
-   - maas-oauth, maas-server -> some cloud settings
-   - all  "<uuid>:s#.*" ->  "<uuid>:a#.*"
-
-* ./settingsrefs.bson
-* ./sshhostkeys.bson
-* ./statuses.bson
-* ./statuseshistory.bson
-* ./storageattachments.bson
-* ./storageconstraints.bson
-* ./storageinstances.bson
-* ./storedResources.bson
-* ./subnets.bson
- - "providerid" has uuid: prefix which needs to be removed.
 * ./toolsmetadata.bson
  - tools structure hasn't changed, but need to add a reference
    for the 2.0 rc/ga tools.
-* ./users.bson
- - remove "deactivated"
 
 
 TODO

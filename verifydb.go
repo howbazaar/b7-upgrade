@@ -12,7 +12,7 @@ func (c *upgrade) verifyDB(ctx *cmd.Context) error {
 	// Try to read the agent config file.
 	// assuming machine-0 of controller
 
-	st, err := openBeta7DB()
+	st, err := openDBusingState()
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -38,6 +38,8 @@ func (c *upgrade) verifyDB(ctx *cmd.Context) error {
 			ctx.Infof("  %s: %s", machine.Tag.Id(), machine.Address)
 		}
 	}
+
+	// TODO prechecks.
 
 	return nil
 }

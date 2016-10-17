@@ -125,7 +125,7 @@ func openSession() (*mgo.Session, error) {
 	return session, nil
 }
 
-func openBeta7DB() (*state.State, error) {
+func openDBusingState() (*state.State, error) {
 	config, err := getConfig()
 	if err != nil {
 		return nil, errors.Trace(err)

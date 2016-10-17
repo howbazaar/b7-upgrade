@@ -1,12 +1,21 @@
 package main
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"fmt"
+	"io"
+	"io/ioutil"
+	"os"
 	"strings"
 
 	"github.com/juju/cmd"
 	"github.com/juju/errors"
+	"github.com/juju/juju/state"
+	"github.com/juju/juju/state/binarystorage"
 	"github.com/juju/utils"
+	"github.com/juju/utils/set"
+	"github.com/juju/version"
 	"gopkg.in/juju/names.v2"
 	"gopkg.in/mgo.v2/bson"
 	"gopkg.in/mgo.v2/txn"
@@ -21,19 +30,33 @@ const (
 	fullWidthDot    = "\uff0e"
 	fullWidthDollar = "\uff04"
 
-	annotationC       = "annotations"
-	applicationC      = "applications"
-	constraintsC      = "constraints"
-	endpointbindingsC = "endpointbindings"
-	leasesC           = "leases"
-	modelEntityRefsC  = "modelEntityRefs"
-	relationsC        = "relations"
-	resourcesC        = "resources"
-	serviceC          = "services"
-	sequenceC         = "sequence"
-	settingsC         = "settings"
-	usermodelnameC    = "usermodelname"
-	unitC             = "units"
+	annotationC         = "annotations"
+	applicationC        = "applications"
+	cloudsC             = "clouds"
+	cloudCredentialsC   = "cloudCredentials"
+	cloudimagemetadataC = "cloudimagemetadata"
+	constraintsC        = "constraints"
+	controllersC        = "controllers"
+	endpointbindingsC   = "endpointbindings"
+	leasesC             = "leases"
+	machinesC           = "machines"
+	modelsC             = "models"
+	modelEntityRefsC    = "modelEntityRefs"
+	modelusersC         = "modelusers"
+	relationsC          = "relations"
+	refcountsC          = "refcounts"
+	resourcesC          = "resources"
+	serviceC            = "services"
+	sequenceC           = "sequence"
+	settingsC           = "settings"
+	settingsrefsC       = "settingsrefs"
+	statusesC           = "statuses"
+	statusHistoryC      = "statuseshistory"
+	storageconstraintsC = "storageconstraints"
+	subnetsC            = "subnets"
+	usermodelnameC      = "usermodelname"
+	unitC               = "units"
+	usersC              = "users"
 )
 
 var (
@@ -47,6 +70,10 @@ type dbUpgradeContext struct {
 	live               bool
 	controllerUUID     string
 	controllerSettings map[string]interface{}
+
+	cloud      string
+	credential string
+	owner      string // admin@local
 }
 
 func (c *dbUpgradeContext) Info(args ...interface{}) {
@@ -56,12 +83,16 @@ func (c *dbUpgradeContext) Info(args ...interface{}) {
 func (c *upgrade) upgradeDB(ctx *cmd.Context) error {
 	// TODO: consider other non-juju databases
 	// logs, file and charm storage
-	if len(c.args) > 0 {
-		return errors.Errorf("unexpected args: %v", c.args)
+	if len(c.args) == 0 {
+		return errors.Errorf("missing path to 2.0 tools file")
 	}
+	if len(c.args) > 1 {
+		return errors.Errorf("unexpected args: %v", c.args[1:])
+	}
+	toolsFilename := c.args[0]
+
 	// Try to read the agent config file.
 	// assuming machine-0 of controller
-
 	db, err := NewDatabase()
 	if err != nil {
 		return errors.Trace(err)
@@ -73,7 +104,7 @@ func (c *upgrade) upgradeDB(ctx *cmd.Context) error {
 		ctx.Infof("  %s", name)
 	}
 
-	// TODO: the first thing that should happen is to create a controller-uuid
+	// The first thing that should happen is to create a controller-uuid
 	// This needs to be stored both in the DB and the agent config.
 	context := &dbUpgradeContext{
 		cmdCtx:         ctx,
@@ -82,11 +113,12 @@ func (c *upgrade) upgradeDB(ctx *cmd.Context) error {
 		controllerUUID: utils.MustNewUUID().String(),
 	}
 
+	if err := upgradePrecheck(context); err != nil {
+		return err
+	}
+
 	ctx.Infof("Generated new controller UUID: %s", context.controllerUUID)
 
-	// TODO: sanity check that lists all collections in the DB and verifies
-	// that all collections that we don't migrate or haven't verified no-
-	// change have no rows.
 	if err := updateController(context); err != nil {
 		return err
 	}
@@ -98,25 +130,128 @@ func (c *upgrade) upgradeDB(ctx *cmd.Context) error {
 		return err
 	}
 
-	if err := updateAgentTools(context); err != nil {
-		// add tools to db
-
-		// "tools" in unit and machine.
+	if err := otherSchemaUpgrades(context); err != nil {
 		return err
 	}
 
-	// TODO: drop all indices
-	// TODO: re-open using state.Open in order to recreate indices
+	if err := updateAgentTools(context); err != nil {
+		return err
+	}
+
+	// Drop all indices
+	for _, name := range db.collections.SortedValues() {
+		col := db.GetCollection(name)
+		indices, err := col.Indexes()
+		if err != nil {
+			return errors.Annotatef(err, "unable to get indices for %q", name)
+		}
+		for _, idx := range indices {
+			ctx.Infof("Drop index %s.%s", name, idx.Name)
+			if c.live {
+				col.DropIndexName(idx.Name)
+			}
+		}
+	}
+
+	// Re-open using state.Open in order to recreate indices
+	st, err := openDBusingState()
+	if err != nil {
+		return errors.Annotate(err, "reopening DB using state to recreate indices")
+	}
+	defer st.Close()
+	// Add the tools to the DB.
+	if err := addTwoZeroBinariesToDB(context, st, toolsFilename); err != nil {
+		return errors.Annotate(err, "adding 2.0 binaries to DB")
+	}
 
 	return errors.NotImplementedf("complete migration")
 }
 
+func upgradePrecheck(context *dbUpgradeContext) error {
+	for _, name := range []string{
+		"assignUnits",      // there should be no pending work to do
+		"cleanups",         // all cleansups should ahve been executed
+		"migrations",       // migrations is beta, should have nothing in it.
+		"ipaddresses",      // legacy collection, should not have data.
+		"storageinstances", // structure did change, but not migrated here due to unused status.
+	} {
+		rows, err := context.db.GetCollection(name).Count()
+		if err != nil {
+			return errors.Annotatef(err, "getting row count for %q", name)
+		}
+		if rows > 0 {
+			return errors.Errorf("%q has data, shouldn't have data", name)
+		}
+	}
+	return nil
+}
+
+func addTwoZeroBinariesToDB(context *dbUpgradeContext, st *state.State, toolsFilename string) error {
+	storage, err := st.ToolsStorage()
+	if err != nil {
+		return errors.Annotate(err, "getting tools storage")
+	}
+	defer storage.Close()
+
+	tools, err := os.Open(toolsFilename)
+	if err != nil {
+		return errors.Annotatef(err, "problem opening %q", toolsFilename)
+	}
+	defer tools.Close()
+
+	// Read the tools tarball from the request, calculating the sha256 along the way.
+	data, sha256, err := readAndHash(tools)
+	if err != nil {
+		return err
+	}
+
+	for _, v := range []version.Binary{
+		// Almost 100% sure we don't need trusty tools.
+		// version.MustParseBinary("2.0.0-trusty-amd64"),
+		version.MustParseBinary("2.0.0-xenial-amd64"),
+	} {
+		metadata := binarystorage.Metadata{
+			Version: v.String(),
+			Size:    int64(len(data)),
+			SHA256:  sha256,
+		}
+		logger.Debugf("uploading tools %+v to storage", metadata)
+		if err := storage.Add(bytes.NewReader(data), metadata); err != nil {
+			return errors.Trace(err)
+		}
+	}
+	return nil
+}
+
+func readAndHash(r io.Reader) (data []byte, sha256hex string, err error) {
+	hash := sha256.New()
+	data, err = ioutil.ReadAll(io.TeeReader(r, hash))
+	if err != nil {
+		return nil, "", errors.Annotate(err, "error processing file upload")
+	}
+	return data, fmt.Sprintf("%x", hash.Sum(nil)), nil
+}
+
 func updateController(context *dbUpgradeContext) error {
 	fmt.Fprintln(context.cmdCtx.Stdout, "Adding controller settings")
+	controllers := context.db.GetCollection(controllersC)
 	var doc bson.M
-	err := context.db.GetCollection("controllers").FindId("stateServingInfo").One(&doc)
+	err := controllers.FindId("stateServingInfo").One(&doc)
 	if err != nil {
-		return errors.Trace(err)
+		return errors.Annotate(err, "getting stateServingInfo")
+	}
+
+	var controller bson.M
+	err = controllers.FindId("e").One(&controller)
+	if err != nil {
+		return errors.Annotate(err, "getting e")
+	}
+	modelUUID := controller["model-uuid"].(string)
+
+	var controllerModel b7.ModelDoc
+	err = context.db.GetCollection(modelsC).FindId(modelUUID).One(&controllerModel)
+	if err != nil {
+		return errors.Annotate(err, "getting controller model")
 	}
 
 	// Also add in doc for controller settings.
@@ -129,12 +264,58 @@ func updateController(context *dbUpgradeContext) error {
 		"state-port":              doc["stateport"],
 	}
 
+	var controllerSettings b7.SettingsDoc
+	err = context.db.GetCollection(settingsC).FindId(modelUUID + ":e").One(&doc)
+	if err != nil {
+		return errors.Annotate(err, "getting controller model settings")
+	}
+
+	context.cloud = controllerSettings.Settings["type"].(string)
+	context.owner = controllerModel.Owner
+	context.credential = fmt.Sprintf("%s#%s#%s", context.cloud, context.owner, context.cloud)
+	cloud := rc.CloudDoc{
+		Name: context.cloud,
+		Type: context.cloud,
+	}
+	credentails := rc.CloudCredentialDoc{
+		Owner: context.owner,
+		Cloud: context.cloud,
+		Name:  context.cloud,
+	}
+	switch context.cloud {
+	case "lxd":
+		cloud.AuthTypes = []string{"empty"}
+		cloud.Regions = map[string]rc.CloudRegionSubdoc{
+			"localhost": rc.CloudRegionSubdoc{},
+		}
+		credentails.AuthType = "empty"
+	case "maas":
+		cloud.AuthTypes = []string{"oauth1"}
+		cloud.Endpoint = controllerSettings.Settings["maas-server"].(string)
+		credentails.AuthType = "oauth1"
+		credentails.Attributes = map[string]string{
+			"maas-oauth": controllerSettings.Settings["maas-oauth"].(string),
+		}
+	default:
+		return errors.Errorf("unsupported type %q", context.cloud)
+	}
+
 	runner := context.db.TransactionRunner(context.cmdCtx, context.live)
 	err = runner.RunTransaction([]txn.Op{{
-		C:      "controllers",
+		C:      controllersC,
 		Id:     "e",
 		Assert: txn.DocExists,
 		Update: bson.D{{"$set", bson.D{{"cloud", "maas"}}}},
+	}, {
+		C:      cloudsC,
+		Id:     context.cloud,
+		Assert: txn.DocMissing,
+		Insert: cloud,
+	}, {
+		C:      cloudCredentialsC,
+		Id:     context.credential,
+		Assert: txn.DocMissing,
+		Insert: credentails,
 	}, createSettingsOp("controllers", "controllerSettings", settings),
 	})
 	if err != nil {
@@ -145,31 +326,87 @@ func updateController(context *dbUpgradeContext) error {
 	return nil
 }
 
+func removeSettingsBSOND(values set.Strings) bson.D {
+	var result bson.D
+	for _, name := range values.SortedValues() {
+		result = append(result, bson.DocElem{"settings." + name, nil})
+	}
+	return result
+}
+
 func updateModels(context *dbUpgradeContext) error {
 	fmt.Fprintln(context.cmdCtx.Stdout, "Updating models")
 	coll := context.db.GetCollection("models")
 
 	var ops []txn.Op
-
-	var doc bson.M
+	var doc b7.ModelDoc
 	iter := coll.Find(nil).Iter()
 	defer iter.Close()
 	for iter.Next(&doc) {
+
+		removed := set.NewStrings(
+			"admin-secret",
+			"api-port",
+			"bootstrap-addresses-delay",
+			"bootstrap-retry-delay",
+			"bootstrap-timeout",
+			"ca-cert",
+			"ca-private-key",
+			"controller-uuid",
+			"lxc-clone-aufs",
+			"prefer-ipv6",
+			"set-numa-control-policy",
+			"state-port",
+			"tools-metadata-url",
+		)
+
+		switch context.cloud {
+		case "lxd":
+			removed.Union(set.NewStrings(
+				"client-cert",
+				"client-key",
+				"namespace",
+				"remote-url",
+				"server-cert",
+			))
+		case "maas":
+			removed.Union(set.NewStrings(
+				"maas-server",
+				"maas-oauth",
+				"maas-agent-name",
+			))
+		default:
+			return errors.Errorf("unsupported cloud %q", context.cloud)
+		}
+
+		settingsKey := doc.UUID + ":e"
+
 		updates := bson.D{
-			{"cloud", "maas"},
-			{"cloud-credential", "maas/admin@local/maas"}, // TODO: check this credential key
+			{"cloud", context.cloud},
+			{"cloud-credential", context.credential},
 			{"controller-uuid", context.controllerUUID},
 		}
-		if doc["name"] == "admin" {
+		if doc.Name == "admin" {
 			updates = append(updates, bson.DocElem{"name", "controller"})
 		}
 		ops = append(ops, txn.Op{
-			C:      "models",
-			Id:     doc["_id"],
+			C:      modelsC,
+			Id:     doc.UUID,
 			Assert: txn.DocExists,
 			Update: bson.D{
 				{"$set", updates},
 				{"$unset", bson.D{{"server-uuid", nil}}},
+			},
+		}, txn.Op{
+			C:      settingsC,
+			Id:     settingsKey,
+			Assert: txn.DocExists,
+			Update: bson.D{
+				{"$set", bson.D{
+					{"settings.provisioner-harvest-mode", "destroyed"},
+					{"settings.transmit-vendor-metrics", true},
+				}},
+				{"$unset", removeSettingsBSOND(removed)},
 			},
 		})
 	}
@@ -194,7 +431,7 @@ func updateModels(context *dbUpgradeContext) error {
 }
 
 func renameServiceToApplication(context *dbUpgradeContext) error {
-	fmt.Fprintln(context.cmdCtx.Stdout, "Renaming services to applications")
+	context.Info("Renaming services to applications")
 	if err := moveDocsFromServicesToApplications(context); err != nil {
 		return errors.Trace(err)
 	}
@@ -225,22 +462,91 @@ func renameServiceToApplication(context *dbUpgradeContext) error {
 	if err := updateCollectionIDGlobalKey(context, settingsC, ""); err != nil {
 		return errors.Trace(err)
 	}
+	if err := updateCollectionIDGlobalKey(context, statusesC, ""); err != nil {
+		return errors.Trace(err)
+	}
+	if err := updateStatusHistoryCollection(context); err != nil {
+		return errors.Trace(err)
+	}
+	// Remove old settingsrefs collection.
+	if context.live {
+		if err := context.db.GetCollection(serviceC).DropCollection(); err != nil {
+			return errors.Annotate(err, "drop services")
+		}
+		if err := context.db.GetCollection(settingsrefsC).DropCollection(); err != nil {
+			return errors.Annotate(err, "drop settings refs")
+		}
+		if err := context.db.GetCollection("ipaddresses").DropCollection(); err != nil {
+			return errors.Annotate(err, "drop ipaddresses")
+		}
+	} else {
+		context.Info("Drop", serviceC, "collection.")
+		context.Info("Drop", settingsrefsC, "collection.")
+		context.Info("Drop", "ipaddresses", "collection.")
+	}
+	return nil
+}
+
+func otherSchemaUpgrades(context *dbUpgradeContext) error {
+	context.Info("Other DB upgrades")
+	if err := upgradeUsersCollection(context); err != nil {
+		return errors.Trace(err)
+	}
+	if err := upgradeModelUsersCollection(context); err != nil {
+		return errors.Trace(err)
+	}
+	if err := upgradeMachinesCollection(context); err != nil {
+		return errors.Trace(err)
+	}
+	if err := upgradeCloudImageMetadata(context); err != nil {
+		return errors.Trace(err)
+	}
+	if err := upgradeSubnets(context); err != nil {
+		return errors.Trace(err)
+	}
+
 	return nil
 }
 
 func moveDocsFromServicesToApplications(context *dbUpgradeContext) error {
 	fmt.Fprintln(context.cmdCtx.Stdout, "Moving documents from services collection to applications")
 	coll := context.db.GetCollection(serviceC)
+	storageconstraints := context.db.GetCollection(storageconstraintsC)
 
 	var ops []txn.Op
 
 	var doc bson.D
 	iter := coll.Find(nil).Iter()
 	defer iter.Close()
+	refCounts := make(map[string]int)
 	for iter.Next(&doc) {
 		data := copyBsonDField(doc)
 		data = removeBsonDField(data, "ownertag")
 		id := getStringField(data, "_id")
+
+		modelUUID, appName, ok := splitDocID(id)
+		if !ok {
+			return errors.Errorf("failed to split id %q", id)
+		}
+		charmurl := getStringField(data, "charmurl")
+		unitcount := getIntField(data, "unitcount")
+		// Remove old storage constrant doc, and add new one
+		oldConstraintID := modelUUID + ":s#" + appName
+		newConstraintID := modelUUID + ":asc#" + appName + "#" + charmurl
+		appGlobalKey := modelUUID + ":a#" + appName + "#" + charmurl
+		charmGlobalKey := modelUUID + ":c#" + charmurl
+		for _, key := range []string{charmGlobalKey, appGlobalKey, newConstraintID} {
+			val := refCounts[key]
+			refCounts[key] = val + 1 + unitcount
+		}
+
+		var constraintsDoc bson.D
+		err := storageconstraints.FindId(oldConstraintID).One(&constraintsDoc)
+		if err != nil {
+			return errors.Annotatef(err, "couldn't find storage constraints for %q", oldConstraintID)
+		}
+		removeBsonDField(constraintsDoc, "_id")
+
 		ops = append(
 			ops,
 			txn.Op{
@@ -255,10 +561,35 @@ func moveDocsFromServicesToApplications(context *dbUpgradeContext) error {
 				Assert: txn.DocMissing,
 				Insert: data,
 			},
+			txn.Op{
+				C:      storageconstraintsC,
+				Id:     oldConstraintID,
+				Assert: txn.DocExists,
+				Remove: true,
+			},
+			txn.Op{
+				C:      storageconstraintsC,
+				Id:     newConstraintID,
+				Assert: txn.DocMissing,
+				Insert: constraintsDoc,
+			},
 		)
 	}
 	if err := iter.Err(); err != nil {
 		return errors.Annotate(err, "failed to read services")
+	}
+
+	for key, value := range refCounts {
+		uuid, _, _ := splitDocID(key)
+		ops = append(ops, txn.Op{
+			C:      refcountsC,
+			Id:     key,
+			Assert: txn.DocMissing,
+			Insert: bson.D{
+				{"model-uuid", uuid},
+				{"refcount", value},
+			},
+		})
 	}
 
 	runner := context.db.TransactionRunner(context.cmdCtx, context.live)
@@ -459,6 +790,188 @@ func updateResources(context *dbUpgradeContext) error {
 	return errors.Trace(runner.RunTransaction(ops))
 }
 
+func upgradeUsersCollection(context *dbUpgradeContext) error {
+	context.Info("Updating users")
+	coll := context.db.GetCollection(usersC)
+
+	var ops []txn.Op
+
+	var doc bson.M
+	iter := coll.Find(nil).Iter()
+	defer iter.Close()
+	for iter.Next(&doc) {
+		ops = append(
+			ops,
+			txn.Op{
+				C:      usersC,
+				Id:     doc["_id"],
+				Assert: txn.DocExists,
+				Update: bson.D{
+					{"$unset", bson.D{{"deactivated", nil}}},
+				},
+			},
+		)
+	}
+	if err := iter.Err(); err != nil {
+		return errors.Annotatef(err, "failed to read users")
+	}
+
+	runner := context.db.TransactionRunner(context.cmdCtx, context.live)
+	return errors.Trace(runner.RunTransaction(ops))
+}
+
+func upgradeModelUsersCollection(context *dbUpgradeContext) error {
+	context.Info("Updating model users")
+	coll := context.db.GetCollection(modelusersC)
+
+	var ops []txn.Op
+
+	var doc bson.M
+	iter := coll.Find(nil).Iter()
+	defer iter.Close()
+	for iter.Next(&doc) {
+		ops = append(
+			ops,
+			txn.Op{
+				C:      modelusersC,
+				Id:     doc["_id"],
+				Assert: txn.DocExists,
+				Update: bson.D{
+					{"$set", bson.D{{"object-uuid", doc["model-uuid"]}}},
+					{"$unset", bson.D{{"access", nil}}},
+				},
+			},
+		)
+	}
+	if err := iter.Err(); err != nil {
+		return errors.Annotatef(err, "failed to read model users")
+	}
+
+	runner := context.db.TransactionRunner(context.cmdCtx, context.live)
+	return errors.Trace(runner.RunTransaction(ops))
+}
+
+func upgradeMachinesCollection(context *dbUpgradeContext) error {
+	context.Info("Updating machines")
+	coll := context.db.GetCollection(machinesC)
+
+	var ops []txn.Op
+
+	var doc b7.MachineDoc
+	iter := coll.Find(nil).Iter()
+	defer iter.Close()
+	for iter.Next(&doc) {
+
+		var containers []string
+		for _, value := range doc.SupportedContainers {
+			if value != "lxc" {
+				containers = append(containers, value)
+			}
+		}
+
+		ops = append(
+			ops,
+			txn.Op{
+				C:      machinesC,
+				Id:     doc.DocID,
+				Assert: txn.DocExists,
+				Update: bson.D{
+					{"$set", bson.D{{"supportedcontainers", containers}}},
+				},
+			},
+		)
+	}
+	if err := iter.Err(); err != nil {
+		return errors.Annotatef(err, "failed to read machines")
+	}
+
+	runner := context.db.TransactionRunner(context.cmdCtx, context.live)
+	return errors.Trace(runner.RunTransaction(ops))
+}
+
+func upgradeSubnets(context *dbUpgradeContext) error {
+	context.Info("Updating subnets")
+	coll := context.db.GetCollection(subnetsC)
+
+	var ops []txn.Op
+
+	var doc bson.D
+	iter := coll.Find(nil).Iter()
+	defer iter.Close()
+	for iter.Next(&doc) {
+
+		modelUUID := getStringField(doc, "model-uuid")
+		providerID := getStringField(doc, "providerid")
+
+		if strings.HasPrefix(providerID, modelUUID) {
+			providerID = providerID[len(modelUUID)+1:]
+			ops = append(
+				ops,
+				txn.Op{
+					C:      subnetsC,
+					Id:     getStringField(doc, "_id"),
+					Assert: txn.DocExists,
+					Update: bson.D{
+						{"$set", bson.D{{"providerid", providerID}}},
+					},
+				},
+			)
+		}
+	}
+	if err := iter.Err(); err != nil {
+		return errors.Annotatef(err, "failed to read subnets")
+	}
+
+	runner := context.db.TransactionRunner(context.cmdCtx, context.live)
+	return errors.Trace(runner.RunTransaction(ops))
+}
+
+func upgradeCloudImageMetadata(context *dbUpgradeContext) error {
+	context.Info("Updating cloudimagemetadata")
+	coll := context.db.GetCollection(cloudimagemetadataC)
+
+	var ops []txn.Op
+
+	var doc bson.D
+	iter := coll.Find(nil).Iter()
+	defer iter.Close()
+	for iter.Next(&doc) {
+		oldID := getStringField(doc, "_id")
+		_, localID, ok := splitDocID(oldID)
+		if !ok {
+			continue
+		}
+
+		data := copyBsonDField(doc)
+
+		// this isn't actually necessary, but will make the output look consistent
+		replaceBsonDField(data, "_id", localID)
+		removeBsonDField(data, "model-uuid")
+
+		ops = append(
+			ops,
+			txn.Op{
+				C:      cloudimagemetadataC,
+				Id:     oldID,
+				Assert: txn.DocExists,
+				Remove: true,
+			},
+			txn.Op{
+				C:      cloudimagemetadataC,
+				Id:     localID,
+				Assert: txn.DocMissing,
+				Insert: data,
+			},
+		)
+	}
+	if err := iter.Err(); err != nil {
+		return errors.Annotatef(err, "failed to read cloutimagemetadata")
+	}
+
+	runner := context.db.TransactionRunner(context.cmdCtx, context.live)
+	return errors.Trace(runner.RunTransaction(ops))
+}
+
 func updateCollectionIDGlobalKey(context *dbUpgradeContext, collection string, keyName string) error {
 	fmt.Fprintln(context.cmdCtx.Stdout, "Updating", collection)
 	coll := context.db.GetCollection(collection)
@@ -514,6 +1027,36 @@ func updateCollectionIDGlobalKey(context *dbUpgradeContext, collection string, k
 	return errors.Trace(runner.RunTransaction(ops))
 }
 
+func updateStatusHistoryCollection(context *dbUpgradeContext) error {
+	context.Info("Updating status history")
+	coll := context.db.GetCollection(statusHistoryC)
+
+	var doc bson.M
+	iter := coll.Find(nil).Iter()
+	defer iter.Close()
+	for iter.Next(&doc) {
+
+		key := doc["globalkey"].(string)
+		if !strings.HasPrefix(key, "s#") {
+			continue
+		}
+
+		newKey := "a" + key[1:]
+
+		if context.live {
+			if err := coll.UpdateId(doc["_id"], bson.D{{"$set", bson.D{{"globalkey", newKey}}}}); err != nil {
+				return errors.Trace(err)
+			}
+		} else {
+			context.Info("update %q, set globalkey to %q", doc["_id"].(string), newKey)
+		}
+	}
+	if err := iter.Err(); err != nil {
+		return errors.Annotatef(err, "failed to status history")
+	}
+	return nil
+}
+
 func updateSequence(context *dbUpgradeContext) error {
 	fmt.Fprintln(context.cmdCtx.Stdout, "Updating sequences")
 	sequences := context.db.GetCollection(sequenceC)
@@ -563,11 +1106,55 @@ func updateSequence(context *dbUpgradeContext) error {
 }
 
 func updateAgentTools(context *dbUpgradeContext) error {
-	// obviously we need to insert all docs from service -> application collection
+	context.Info("Updating tools field on units and machines")
+	var ops []txn.Op
 
-	// annotations store global key, so service -> app
-	// settings store global key
-	return errors.NotImplementedf("updateAgentTools")
+	// This code assumes a homogeneous environment of xenial amd64 machines.
+	const agentVersion = "2.0.0-xenial-amd64"
+
+	var doc bson.M
+	iter := context.db.GetCollection(machinesC).Find(nil).Iter()
+	defer iter.Close()
+	for iter.Next(&doc) {
+
+		ops = append(
+			ops,
+			txn.Op{
+				C:      machinesC,
+				Id:     doc["_id"],
+				Assert: txn.DocExists,
+				Update: bson.D{
+					{"$set", bson.D{{"tools.version", agentVersion}}},
+				},
+			},
+		)
+	}
+	if err := iter.Err(); err != nil {
+		return errors.Annotatef(err, "failed to read machines for version update")
+	}
+
+	iter = context.db.GetCollection(unitC).Find(nil).Iter()
+	defer iter.Close()
+	for iter.Next(&doc) {
+
+		ops = append(
+			ops,
+			txn.Op{
+				C:      unitC,
+				Id:     doc["_id"],
+				Assert: txn.DocExists,
+				Update: bson.D{
+					{"$set", bson.D{{"tools.version", agentVersion}}},
+				},
+			},
+		)
+	}
+	if err := iter.Err(); err != nil {
+		return errors.Annotatef(err, "failed to read units for version update")
+	}
+
+	runner := context.db.TransactionRunner(context.cmdCtx, context.live)
+	return errors.Trace(runner.RunTransaction(ops))
 }
 
 func createSettingsOp(collection, key string, values map[string]interface{}) txn.Op {
@@ -625,6 +1212,13 @@ func getStringField(d bson.D, name string) string {
 	v, _ := readBsonDField(d, name)
 	s, _ := v.(string)
 	return s
+}
+
+// getIntField returns 0 if name not found or name not an int.
+func getIntField(d bson.D, name string) int {
+	v, _ := readBsonDField(d, name)
+	i, _ := v.(int)
+	return i
 }
 
 // readBsonDField returns the value of a given field in a bson.D.

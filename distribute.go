@@ -32,7 +32,7 @@ func (c *upgrade) distributeUpgrader(ctx *cmd.Context) error {
 	// NOTE: how to we skip doing our own machines?
 	// Perhaps just brute force it and skip admin/0.
 
-	st, err := openBeta7DB()
+	st, err := openDBusingState()
 	if err != nil {
 		return errors.Trace(err)
 	}

@@ -78,3 +78,32 @@ type SettingsDoc struct {
 	// and is increased every time the settings change.
 	Version int64 `bson:"version"`
 }
+
+// cloudDoc records information about the cloud that the controller operates in.
+type CloudDoc struct {
+	DocID            string                       `bson:"_id"`
+	Name             string                       `bson:"name"`
+	Type             string                       `bson:"type"`
+	AuthTypes        []string                     `bson:"auth-types"`
+	Endpoint         string                       `bson:"endpoint"`
+	IdentityEndpoint string                       `bson:"identity-endpoint,omitempty"`
+	StorageEndpoint  string                       `bson:"storage-endpoint,omitempty"`
+	Regions          map[string]CloudRegionSubdoc `bson:"regions,omitempty"`
+}
+
+// cloudRegionSubdoc records information about cloud regions.
+type CloudRegionSubdoc struct {
+	Endpoint         string `bson:"endpoint,omitempty"`
+	IdentityEndpoint string `bson:"identity-endpoint,omitempty"`
+	StorageEndpoint  string `bson:"storage-endpoint,omitempty"`
+}
+
+type CloudCredentialDoc struct {
+	DocID      string            `bson:"_id"`
+	Owner      string            `bson:"owner"`
+	Cloud      string            `bson:"cloud"`
+	Name       string            `bson:"name"`
+	Revoked    bool              `bson:"revoked"`
+	AuthType   string            `bson:"auth-type"`
+	Attributes map[string]string `bson:"attributes,omitempty"`
+}
