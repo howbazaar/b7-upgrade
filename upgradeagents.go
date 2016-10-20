@@ -7,17 +7,18 @@ import (
 
 	"github.com/juju/cmd"
 	"github.com/juju/errors"
+	"github.com/juju/loggo"
 	"github.com/juju/utils/ssh"
 	"gopkg.in/juju/names.v2"
 )
 
 type DistResults struct {
-	Model   string
-	Machine names.MachineTag
-	Error   error
-	Code    int
-	Stdout  string
-	Stderr  string
+	Model     string
+	MachineID string
+	Error     error
+	Code      int
+	Stdout    string
+	Stderr    string
 }
 
 // upgradeAgents will copy the 2.0 tools to every machines
@@ -32,22 +33,19 @@ func (c *upgrade) upgradeAgents(ctx *cmd.Context) error {
 	}
 	toolsFilename := c.args[0]
 
-	st, err := openDBusingState()
+	db, err := NewDatabase()
 	if err != nil {
 		return errors.Trace(err)
 	}
-	defer st.Close()
+	defer db.Close()
 
-	controllerConfig, err := st.ControllerConfig()
-	if err != nil {
-		return errors.Annotatef(err, "failed to get controller config")
-	}
-	if controllerConfig.ControllerUUID() == "" {
+	controllerUUID := db.ControllerUUID()
+	if controllerUUID == "" {
 		return errors.New("missing controller UUID, has upgrade-db been run?")
 	}
-	controllerTag := names.NewControllerTag(controllerConfig.ControllerUUID())
+	controllerTag := names.NewControllerTag(controllerUUID)
 
-	machines, err := getAllMachines(st)
+	machines, err := getAllMachines()
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -64,7 +62,7 @@ func (c *upgrade) upgradeAgents(ctx *cmd.Context) error {
 			defer wg.Done()
 			result := CopyToolsToMachine(c.live, toolsFilename, machine.Address, controllerTag)
 			result.Model = machine.Model
-			result.Machine = machine.Tag
+			result.MachineID = machine.ID
 			lock.Lock()
 			defer lock.Unlock()
 			results = append(results, result)
@@ -77,7 +75,7 @@ func (c *upgrade) upgradeAgents(ctx *cmd.Context) error {
 	// Sort the results
 
 	for _, result := range results {
-		ctx.Infof("%s %s", result.Model, result.Machine.Id())
+		ctx.Infof("%s %s", result.Model, result.MachineID)
 		if result.Error != nil {
 			ctx.Infof("  ERROR: %v", result.Error)
 		}
@@ -118,11 +116,52 @@ func CopyToolsToMachine(live bool, filename, address string, controllerTag names
 		}
 	}
 
-	script := fmt.Sprintf(`
-set -xu
+	var script string
+	if logger.LogLevel() == loggo.DEBUG {
+		script = "set -xu\n"
+	} else {
+		script = "set -u\n"
+	}
 
-echo mkdir -f /var/lib/juju/tools/2.0.0-xenial-amd64
+	script += fmt.Sprintf(`
+echo mkdir -p /var/lib/juju/tools/2.0.0-xenial-amd64
 echo tar --extract --gzip --file=/home/ubuntu/juju-2.0.0-xenial-amd64.tgz --directory=/var/lib/juju/tools/2.0.0-xenial-amd64
+
+declare -a jujuc=(
+  "action-fail"
+  "action-get"
+  "action-set"
+  "add-metric"
+  "application-version-set"
+  "close-port"
+  "config-get"
+  "is-leader"
+  "juju-log"
+  "juju-reboot"
+  "leader-get"
+  "leader-set"
+  "network-get"
+  "opened-ports"
+  "open-port"
+  "payload-register"
+  "payload-status-set"
+  "payload-unregister"
+  "relation-get"
+  "relation-ids"
+  "relation-list"
+  "relation-set"
+  "resource-get"
+  "status-get"
+  "status-set"
+  "storage-add"
+  "storage-get"
+  "storage-list"
+  "unit-get"
+)
+
+for i in "${jujuc[@]}"; do
+    echo ln -s /var/lib/juju/tools/2.0.0-xenial-amd64/jujud "/var/lib/juju/tools/2.0.0-xenial-amd64/$i"
+done
 
 cd /var/lib/juju/agents
 for agent in *
@@ -131,27 +170,12 @@ do
     echo ln -s 2.0.0-xenial-amd64 /var/lib/juju/tools/$agent
 
     echo cp $agent/agent.conf $agent/agent.conf.old
-    echo sed -i 's/# format 1.18/# format 2.0/; s/upgradedToVersion: 2.0-beta7/upgradedToVersion: 2.0-rc1\ncontroller: %s/' agent.conf
+    echo sed -i 's/# format 1.18/# format 2.0/; s/upgradedToVersion: 2.0-beta7/upgradedToVersion: 2.0-rc1\ncontroller: %s/' $agent/agent.conf
 done
 `, controllerTag.String())
 
 	if live {
-		script = fmt.Sprintf(`
-set -xu
-
-mkdir -f /var/lib/juju/tools/2.0.0-xenial-amd64
-tar --extract --gzip --file=/home/ubuntu/juju-2.0.0-xenial-amd64.tgz --directory=/var/lib/juju/tools/2.0.0-xenial-amd64
-
-cd /var/lib/juju/agents
-for agent in *
-do
-	rm /var/lib/juju/tools/$agent
-    ln -s 2.0.0-xenial-amd64 /var/lib/juju/tools/$agent
-
-    cp $agent/agent.conf $agent/agent.conf.old
-    sed -i 's/# format 1.18/# format 2.0/; s/upgradedToVersion: 2.0-beta7/upgradedToVersion: 2.0-rc1\ncontroller: %s/' agent.conf
-done
-`, controllerTag.String())
+		script = strings.Replace(script, "echo ", "", -1)
 	}
 	result, err := runViaSSH(address, script)
 	if err != nil {

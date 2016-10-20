@@ -22,9 +22,18 @@ type ModelDoc struct {
 	ServerUUID string `bson:"server-uuid"`
 }
 
+type Address struct {
+	Value       string `bson:"value"`
+	AddressType string `bson:"addresstype"`
+	Scope       string `bson:"networkscope,omitempty"`
+	Origin      string `bson:"origin,omitempty"`
+	SpaceName   string `bson:"spacename,omitempty"`
+}
+
 type MachineDoc struct {
-	DocID               string   `bson:"_id"`
-	Id                  string   `bson:"machineid"`
-	ModelUUID           string   `bson:"model-uuid"`
-	SupportedContainers []string `bson:",omitempty"`
+	DocID                  string   `bson:"_id"`
+	Id                     string   `bson:"machineid"`
+	ModelUUID              string   `bson:"model-uuid"`
+	PreferredPublicAddress Address  `bson:",omitempty"`
+	SupportedContainers    []string `bson:",omitempty"`
 }

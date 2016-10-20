@@ -4,7 +4,7 @@
 package main
 
 import (
-	"fmt"
+	"os"
 	"sort"
 	"strings"
 
@@ -81,12 +81,10 @@ func (c *upgrade) validCommands() string {
 
 func (c *upgrade) commands() map[string]func(ctx *cmd.Context) error {
 	return map[string]func(ctx *cmd.Context) error{
-		"verify-db":           c.verifyDB,
-		"distribute-upgrader": c.distributeUpgrader,
-		"client":              c.client,
-		"agents":              c.agents,
-		"upgrade-db":          c.upgradeDB,
-		"upgrade-agents":      c.upgradeAgents,
+		"verify-db":      c.verifyDB,
+		"agents":         c.agents,
+		"upgrade-db":     c.upgradeDB,
+		"upgrade-agents": c.upgradeAgents,
 	}
 }
 
@@ -100,14 +98,14 @@ func (c *upgrade) Run(ctx *cmd.Context) error {
 	}
 
 	if c.live {
-		ctx.Infof("Running LIVE")
+		logger.Infof("Running LIVE")
 	} else {
-		ctx.Infof("Running dry-run")
+		logger.Infof("Running dry-run")
 	}
 
-	err := c.action(ctx)
-	if err != nil {
-		fmt.Fprintf(ctx.Stderr, "error: %v\n\n%s", err, errors.ErrorStack(err))
+	if err := c.action(ctx); err != nil {
+		logger.Errorf("%v\n\n%s\n\n", err, errors.ErrorStack(err))
+		os.Exit(1)
 	}
-	return err
+	return nil
 }

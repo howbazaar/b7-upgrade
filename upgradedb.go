@@ -16,6 +16,7 @@ import (
 	"github.com/juju/utils"
 	"github.com/juju/utils/set"
 	"github.com/juju/version"
+	"github.com/kr/pretty"
 	"gopkg.in/juju/names.v2"
 	"gopkg.in/mgo.v2/bson"
 	"gopkg.in/mgo.v2/txn"
@@ -99,11 +100,6 @@ func (c *upgrade) upgradeDB(ctx *cmd.Context) error {
 	}
 	defer db.Close()
 
-	ctx.Infof("juju db collections:")
-	for _, name := range db.collections.SortedValues() {
-		ctx.Infof("  %s", name)
-	}
-
 	// The first thing that should happen is to create a controller-uuid
 	// This needs to be stored both in the DB and the agent config.
 	context := &dbUpgradeContext{
@@ -120,37 +116,49 @@ func (c *upgrade) upgradeDB(ctx *cmd.Context) error {
 	ctx.Infof("Generated new controller UUID: %s", context.controllerUUID)
 
 	if err := updateController(context); err != nil {
-		return err
+		return errors.Trace(err)
 	}
 	if err := updateModels(context); err != nil {
-		return err
+		return errors.Trace(err)
 	}
 
 	if err := renameServiceToApplication(context); err != nil {
-		return err
+		return errors.Trace(err)
 	}
 
 	if err := otherSchemaUpgrades(context); err != nil {
-		return err
+		return errors.Trace(err)
 	}
 
 	if err := updateAgentTools(context); err != nil {
-		return err
+		return errors.Trace(err)
 	}
 
 	// Drop all indices
-	for _, name := range db.collections.SortedValues() {
+	collections, err := db.Collections()
+	if err != nil {
+		return errors.Trace(err)
+	}
+	for _, name := range collections.SortedValues() {
 		col := db.GetCollection(name)
 		indices, err := col.Indexes()
 		if err != nil {
 			return errors.Annotatef(err, "unable to get indices for %q", name)
 		}
 		for _, idx := range indices {
+			if idx.Name == "_id_" {
+				continue
+			}
 			ctx.Infof("Drop index %s.%s", name, idx.Name)
 			if c.live {
 				col.DropIndexName(idx.Name)
 			}
 		}
+	}
+
+	if !c.live {
+		ctx.Infof("skipping reopening db with state as that modifies lease clocks")
+		return nil
 	}
 
 	// Re-open using state.Open in order to recreate indices
@@ -164,7 +172,7 @@ func (c *upgrade) upgradeDB(ctx *cmd.Context) error {
 		return errors.Annotate(err, "adding 2.0 binaries to DB")
 	}
 
-	return errors.NotImplementedf("complete migration")
+	return nil
 }
 
 func upgradePrecheck(context *dbUpgradeContext) error {
@@ -205,6 +213,16 @@ func addTwoZeroBinariesToDB(context *dbUpgradeContext, st *state.State, toolsFil
 		return err
 	}
 
+	if context.live {
+		blobstore := context.db.session.DB("blobstore")
+		err := blobstore.C("blobstore.chunks").DropIndexName("files_id_1_n_1")
+		if err != nil {
+			return errors.Trace(err)
+		}
+	} else {
+		context.Info("removing index from blobstore")
+	}
+
 	for _, v := range []version.Binary{
 		// Almost 100% sure we don't need trusty tools.
 		// version.MustParseBinary("2.0.0-trusty-amd64"),
@@ -216,8 +234,10 @@ func addTwoZeroBinariesToDB(context *dbUpgradeContext, st *state.State, toolsFil
 			SHA256:  sha256,
 		}
 		logger.Debugf("uploading tools %+v to storage", metadata)
-		if err := storage.Add(bytes.NewReader(data), metadata); err != nil {
-			return errors.Trace(err)
+		if context.live {
+			if err := storage.Add(bytes.NewReader(data), metadata); err != nil {
+				return errors.Trace(err)
+			}
 		}
 	}
 	return nil
@@ -241,12 +261,8 @@ func updateController(context *dbUpgradeContext) error {
 		return errors.Annotate(err, "getting stateServingInfo")
 	}
 
-	var controller bson.M
-	err = controllers.FindId("e").One(&controller)
-	if err != nil {
-		return errors.Annotate(err, "getting e")
-	}
-	modelUUID := controller["model-uuid"].(string)
+	modelUUID := context.db.ControllerModelUUID()
+	logger.Debugf("controller model-uuid: %s", modelUUID)
 
 	var controllerModel b7.ModelDoc
 	err = context.db.GetCollection(modelsC).FindId(modelUUID).One(&controllerModel)
@@ -254,20 +270,22 @@ func updateController(context *dbUpgradeContext) error {
 		return errors.Annotate(err, "getting controller model")
 	}
 
+	var controllerSettings b7.SettingsDoc
+	err = context.db.GetCollection(settingsC).FindId(modelUUID + ":e").One(&controllerSettings)
+	if err != nil {
+		return errors.Annotate(err, "getting controller model settings")
+	}
+
+	logger.Debugf("controllerSettings: %# v", pretty.Formatter(controllerSettings))
+
 	// Also add in doc for controller settings.
 	settings := map[string]interface{}{
 		"api-port":                doc["apiport"],
 		"auditing-enabled":        false,
-		"ca-cert":                 doc["cert"],
+		"ca-cert":                 controllerSettings.Settings["ca-cert"],
 		"controller-uuid":         context.controllerUUID,
 		"set-numa-control-policy": false,
 		"state-port":              doc["stateport"],
-	}
-
-	var controllerSettings b7.SettingsDoc
-	err = context.db.GetCollection(settingsC).FindId(modelUUID + ":e").One(&doc)
-	if err != nil {
-		return errors.Annotate(err, "getting controller model settings")
 	}
 
 	context.cloud = controllerSettings.Settings["type"].(string)
@@ -289,6 +307,9 @@ func updateController(context *dbUpgradeContext) error {
 			"localhost": rc.CloudRegionSubdoc{},
 		}
 		credentails.AuthType = "empty"
+		if err := writeLXDCerts(controllerSettings, context.live); err != nil {
+			return errors.Annotate(err, "failed to write out lxd certs")
+		}
 	case "maas":
 		cloud.AuthTypes = []string{"oauth1"}
 		cloud.Endpoint = controllerSettings.Settings["maas-server"].(string)
@@ -305,7 +326,7 @@ func updateController(context *dbUpgradeContext) error {
 		C:      controllersC,
 		Id:     "e",
 		Assert: txn.DocExists,
-		Update: bson.D{{"$set", bson.D{{"cloud", "maas"}}}},
+		Update: bson.D{{"$set", bson.D{{"cloud", context.cloud}}}},
 	}, {
 		C:      cloudsC,
 		Id:     context.cloud,
@@ -323,6 +344,36 @@ func updateController(context *dbUpgradeContext) error {
 	}
 
 	context.controllerSettings = settings
+	return nil
+}
+
+func writeLXDCerts(controllerSettings b7.SettingsDoc, live bool) error {
+	if live {
+		if err := os.MkdirAll("/etc/juju", 0755); err != nil {
+			return errors.Trace(err)
+		}
+	} else {
+		logger.Debugf("mkdir /etc/juju")
+	}
+	for _, action := range []struct {
+		setting  string
+		filename string
+	}{
+		{"client-cert", "lxd-client.crt"},
+		{"client-key", "lxd-client.key"},
+		{"server-cert", "lxd-server.crt"},
+	} {
+		content := controllerSettings.Settings[action.setting].(string)
+		filename := "/etc/juju/" + action.filename
+		if live {
+			err := ioutil.WriteFile(filename, []byte(content), 0600)
+			if err != nil {
+				return errors.Trace(err)
+			}
+		} else {
+			logger.Debugf("writing %s:\n%s\n------", filename, content)
+		}
+	}
 	return nil
 }
 
@@ -403,6 +454,7 @@ func updateModels(context *dbUpgradeContext) error {
 			Assert: txn.DocExists,
 			Update: bson.D{
 				{"$set", bson.D{
+					{"settings.agent-version", "2.0.0"},
 					{"settings.provisioner-harvest-mode", "destroyed"},
 					{"settings.transmit-vendor-metrics", true},
 				}},
@@ -520,9 +572,9 @@ func moveDocsFromServicesToApplications(context *dbUpgradeContext) error {
 	defer iter.Close()
 	refCounts := make(map[string]int)
 	for iter.Next(&doc) {
+		id := getStringField(doc, "_id")
 		data := copyBsonDField(doc)
 		data = removeBsonDField(data, "ownertag")
-		id := getStringField(data, "_id")
 
 		modelUUID, appName, ok := splitDocID(id)
 		if !ok {
@@ -640,7 +692,12 @@ func updateLeases(context *dbUpgradeContext) error {
 	defer iter.Close()
 	for iter.Next(&doc) {
 		oldID := getStringField(doc, "_id")
-		if namespace, ok := readBsonDField(doc, "namespace"); !ok || namespace != "service-leadership" {
+		namespace, ok := readBsonDField(doc, "namespace")
+		if namespace == "application-leadership" {
+			return errors.Errorf("lease doc already has application-leadership: %q", oldID)
+		}
+		if !ok || namespace != "service-leadership" {
+			logger.Debugf("skipping lease with id %q", oldID)
 			continue
 		}
 
@@ -651,8 +708,6 @@ func updateLeases(context *dbUpgradeContext) error {
 		if name := getStringField(data, "name"); name != "" {
 			newID += name + "#"
 		}
-		// this isn't actually necessary, but will make the output look consistent
-		replaceBsonDField(data, "_id", newID)
 
 		ops = append(
 			ops,
@@ -728,7 +783,7 @@ func updateRelations(context *dbUpgradeContext) error {
 			return errors.Errorf("programming error reading relations endpoints, type %T", doc["endpoints"])
 		}
 		for i, ep := range endpoints {
-			epData, ok := ep.(map[string]interface{})
+			epData, ok := ep.(bson.M)
 			if !ok {
 				return errors.Errorf("programming error iterating relations endpoints, ep type %T", ep)
 			}
@@ -943,9 +998,6 @@ func upgradeCloudImageMetadata(context *dbUpgradeContext) error {
 		}
 
 		data := copyBsonDField(doc)
-
-		// this isn't actually necessary, but will make the output look consistent
-		replaceBsonDField(data, "_id", localID)
 		removeBsonDField(data, "model-uuid")
 
 		ops = append(
@@ -993,8 +1045,6 @@ func updateCollectionIDGlobalKey(context *dbUpgradeContext, collection string, k
 		data := copyBsonDField(doc)
 		newKey := "a" + localID[1:]
 		newID := model + ":" + newKey
-		// this isn't actually necessary, but will make the output look consistent
-		replaceBsonDField(data, "_id", newID)
 		if keyName != "" {
 			replaceBsonDField(data, keyName, newKey)
 		}
@@ -1048,7 +1098,7 @@ func updateStatusHistoryCollection(context *dbUpgradeContext) error {
 				return errors.Trace(err)
 			}
 		} else {
-			context.Info("update %q, set globalkey to %q", doc["_id"].(string), newKey)
+			logger.Debugf("update %q, set globalkey to %q", doc["_id"].(bson.ObjectId), newKey)
 		}
 	}
 	if err := iter.Err(); err != nil {
@@ -1204,6 +1254,10 @@ func localID(ID string) string {
 func copyBsonDField(src bson.D) bson.D {
 	result := make(bson.D, len(src))
 	copy(result, src)
+	// remove three fields
+	for _, field := range []string{"_id", "txn-revno", "txn-queue"} {
+		result = removeBsonDField(result, field)
+	}
 	return result
 }
 

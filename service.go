@@ -6,7 +6,6 @@ import (
 
 	"github.com/juju/cmd"
 	"github.com/juju/errors"
-	"github.com/juju/juju/state"
 )
 
 func (c *upgrade) agents(ctx *cmd.Context) error {
@@ -17,29 +16,23 @@ func (c *upgrade) agents(ctx *cmd.Context) error {
 		return errors.Errorf("unexpected args: %v", c.args[1:])
 	}
 
-	st, err := openDBusingState()
-	if err != nil {
-		return errors.Trace(err)
-	}
-	defer st.Close()
-
 	switch c.args[0] {
 	case "stop":
-		return c.stopAgents(ctx, st)
+		return c.stopAgents(ctx)
 	case "start-controller":
-		return c.startServer(ctx, st)
+		return c.startServer(ctx)
 	case "start-others":
-		return c.startAgents(ctx, st)
+		return c.startAgents(ctx)
 	case "status":
-		return c.agentStatus(ctx, st)
+		return c.agentStatus(ctx)
 	default:
 		return errors.Errorf("unknown action: %q", c.args[0])
 	}
 	return nil
 }
 
-func (c *upgrade) stopAgents(ctx *cmd.Context, st *state.State) error {
-	machines, err := getAllMachines(st)
+func (c *upgrade) stopAgents(ctx *cmd.Context) error {
+	machines, err := getAllMachines()
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -47,16 +40,16 @@ func (c *upgrade) stopAgents(ctx *cmd.Context, st *state.State) error {
 	return serviceCall(ctx, machines, "stop")
 }
 
-func (c *upgrade) startServer(ctx *cmd.Context, st *state.State) error {
-	server, err := getServerMachine(st)
+func (c *upgrade) startServer(ctx *cmd.Context) error {
+	server, err := getServerMachine()
 	if err != nil {
 		return errors.Trace(err)
 	}
 	return serviceCall(ctx, []FlatMachine{server}, "start")
 }
 
-func (c *upgrade) startAgents(ctx *cmd.Context, st *state.State) error {
-	machines, err := getOtherMachines(st)
+func (c *upgrade) startAgents(ctx *cmd.Context) error {
+	machines, err := getOtherMachines()
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -64,8 +57,8 @@ func (c *upgrade) startAgents(ctx *cmd.Context, st *state.State) error {
 	return serviceCall(ctx, machines, "start")
 }
 
-func (c *upgrade) agentStatus(ctx *cmd.Context, st *state.State) error {
-	machines, err := getAllMachines(st)
+func (c *upgrade) agentStatus(ctx *cmd.Context) error {
+	machines, err := getAllMachines()
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -87,7 +80,7 @@ done
 	results := parallelCall(machines, script)
 
 	for _, result := range results {
-		ctx.Infof("%s %s", result.Model, result.Machine.Id())
+		ctx.Infof("%s %s", result.Model, result.MachineID)
 		if result.Error != nil {
 			ctx.Infof("  ERROR: %v", result.Error)
 		}
@@ -99,7 +92,7 @@ done
 			ctx.Infof("    %s", out)
 		}
 		if result.Stderr != "" {
-			logger.Debugf("%s/%s stderr: \n%s", result.Model, result.Machine.Id(), result.Stderr)
+			logger.Debugf("%s/%s stderr: \n%s", result.Model, result.MachineID, result.Stderr)
 		}
 	}
 

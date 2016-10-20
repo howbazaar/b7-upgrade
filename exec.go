@@ -1,18 +1,14 @@
 package main
 
-import (
-	"sync"
-
-	"gopkg.in/juju/names.v2"
-)
+import "sync"
 
 type DistResult struct {
-	Model   string
-	Machine names.MachineTag
-	Error   error
-	Code    int
-	Stdout  string
-	Stderr  string
+	Model     string
+	MachineID string
+	Error     error
+	Code      int
+	Stdout    string
+	Stderr    string
 }
 
 func parallelCall(machines []FlatMachine, script string) []DistResult {
@@ -29,12 +25,12 @@ func parallelCall(machines []FlatMachine, script string) []DistResult {
 			defer wg.Done()
 			run, err := runViaSSH(machine.Address, script)
 			result := DistResult{
-				Model:   machine.Model,
-				Machine: machine.Tag,
-				Error:   err,
-				Code:    run.Code,
-				Stdout:  run.Stdout,
-				Stderr:  run.Stderr,
+				Model:     machine.Model,
+				MachineID: machine.ID,
+				Error:     err,
+				Code:      run.Code,
+				Stdout:    run.Stdout,
+				Stderr:    run.Stderr,
 			}
 			lock.Lock()
 			defer lock.Unlock()
