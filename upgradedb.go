@@ -33,6 +33,7 @@ const (
 
 	annotationC         = "annotations"
 	applicationC        = "applications"
+	cleanupsC           = "cleanups"
 	cloudsC             = "clouds"
 	cloudCredentialsC   = "cloudCredentials"
 	cloudimagemetadataC = "cloudimagemetadata"
@@ -178,7 +179,7 @@ func (c *upgrade) upgradeDB(ctx *cmd.Context) error {
 func upgradePrecheck(context *dbUpgradeContext) error {
 	for _, name := range []string{
 		"assignUnits",      // there should be no pending work to do
-		"cleanups",         // all cleansups should ahve been executed
+		cleanupsC,          // all cleansups should ahve been executed
 		"migrations",       // migrations is beta, should have nothing in it.
 		"ipaddresses",      // legacy collection, should not have data.
 		"storageinstances", // structure did change, but not migrated here due to unused status.

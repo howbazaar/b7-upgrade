@@ -83,6 +83,7 @@ func (c *upgrade) commands() map[string]func(ctx *cmd.Context) error {
 	return map[string]func(ctx *cmd.Context) error{
 		"verify-db":      c.verifyDB,
 		"agents":         c.agents,
+		"clean-db":       c.cleanDB,
 		"upgrade-db":     c.upgradeDB,
 		"upgrade-agents": c.upgradeAgents,
 	}
