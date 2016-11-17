@@ -114,6 +114,10 @@ type liveRunner struct {
 	runner jujutxn.Runner
 }
 
+func (r *liveRunner) ResumeTransactions() error {
+	return errors.Trace(r.runner.ResumeTransactions())
+}
+
 // Only supports the RunTransaction method, all others panic.
 func (r *liveRunner) RunTransaction(ops []txn.Op) error {
 	if r.live {

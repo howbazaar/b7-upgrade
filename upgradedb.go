@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/juju/cmd"
 	"github.com/juju/errors"
@@ -39,12 +40,14 @@ const (
 	cloudimagemetadataC = "cloudimagemetadata"
 	constraintsC        = "constraints"
 	controllersC        = "controllers"
+	controllerusersC    = "controllerusers"
 	endpointbindingsC   = "endpointbindings"
 	leasesC             = "leases"
 	machinesC           = "machines"
 	modelsC             = "models"
 	modelEntityRefsC    = "modelEntityRefs"
 	modelusersC         = "modelusers"
+	permissionsC        = "permissions"
 	relationsC          = "relations"
 	refcountsC          = "refcounts"
 	resourcesC          = "resources"
@@ -111,6 +114,10 @@ func (c *upgrade) upgradeDB(ctx *cmd.Context) error {
 	}
 
 	if err := upgradePrecheck(context); err != nil {
+		return err
+	}
+
+	if err := cleanTxnQueue(context); err != nil {
 		return err
 	}
 
@@ -192,6 +199,30 @@ func upgradePrecheck(context *dbUpgradeContext) error {
 			return errors.Errorf("%q has data, shouldn't have data", name)
 		}
 	}
+	return nil
+}
+
+func cleanTxnQueue(context *dbUpgradeContext) error {
+	if !context.live {
+		return nil
+	}
+
+	context.Info("Repair controller apiHostPorts txn-queue.")
+	if err := context.db.GetCollection(controllersC).UpdateId("apiHostPorts", bson.D{{"$set", bson.D{{"txn-queue", []string{}}}}}); err != nil {
+		return errors.Trace(err)
+	}
+
+	context.Info("Make sure any pending transactions are complete.")
+	runner := context.db.TransactionRunner(context.cmdCtx, context.live)
+	if err := runner.ResumeTransactions(); err != nil {
+		return errors.Trace(err)
+	}
+
+	context.Info("Clear out the txn-queue on the models.")
+	if _, err := context.db.GetCollection(modelsC).UpdateAll(nil, bson.D{{"$set", bson.D{{"txn-queue", []string{}}}}}); err != nil {
+		return errors.Trace(err)
+	}
+
 	return nil
 }
 
@@ -338,8 +369,27 @@ func updateController(context *dbUpgradeContext) error {
 		Id:     context.credential,
 		Assert: txn.DocMissing,
 		Insert: credentails,
-	}, createSettingsOp("controllers", "controllerSettings", settings),
-	})
+	}, createSettingsOp("controllers", "controllerSettings", settings), {
+		C:      permissionsC,
+		Id:     fmt.Sprintf("c#%s#us#admin@local", context.controllerUUID),
+		Assert: txn.DocMissing,
+		Insert: bson.M{
+			"access":             "superuser",
+			"object-global-key":  "c#" + context.controllerUUID,
+			"subject-global-key": "us#admin@local",
+		},
+	}, {
+		C:      controllerusersC,
+		Id:     "admin@local",
+		Assert: txn.DocMissing,
+		Insert: bson.M{
+			"createdby":   "admin@local",
+			"datecreated": time.Date(2016, 11, 18, 12, 0, 0, 0, time.UTC),
+			"displayname": "admin",
+			"object-uuid": context.controllerUUID,
+			"user":        "admin@local",
+		},
+	}})
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -448,6 +498,15 @@ func updateModels(context *dbUpgradeContext) error {
 			Update: bson.D{
 				{"$set", updates},
 				{"$unset", bson.D{{"server-uuid", nil}}},
+			},
+		}, txn.Op{
+			C:      permissionsC,
+			Id:     fmt.Sprintf("e#%s#us#admin@local", doc.UUID),
+			Assert: txn.DocMissing,
+			Insert: bson.M{
+				"access":             "admin",
+				"object-global-key":  "e#" + doc.UUID,
+				"subject-global-key": "us#admin@local",
 			},
 		}, txn.Op{
 			C:      settingsC,

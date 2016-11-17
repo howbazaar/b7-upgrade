@@ -2,6 +2,7 @@ package rc
 
 import (
 	"errors"
+	"time"
 
 	"gopkg.in/mgo.v2/bson"
 )
@@ -106,4 +107,13 @@ type CloudCredentialDoc struct {
 	Revoked    bool              `bson:"revoked"`
 	AuthType   string            `bson:"auth-type"`
 	Attributes map[string]string `bson:"attributes,omitempty"`
+}
+
+type UserAccessDoc struct {
+	ID          string    `bson:"_id"`
+	ObjectUUID  string    `bson:"object-uuid"`
+	UserName    string    `bson:"user"`
+	DisplayName string    `bson:"displayname"`
+	CreatedBy   string    `bson:"createdby"`
+	DateCreated time.Time `bson:"datecreated"`
 }
