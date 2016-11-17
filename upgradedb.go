@@ -42,12 +42,15 @@ const (
 	controllersC        = "controllers"
 	controllerusersC    = "controllerusers"
 	endpointbindingsC   = "endpointbindings"
+	ipAddressesC        = "ip.addresses"
 	leasesC             = "leases"
+	linklayerdevicesC   = "linklayerdevices"
 	machinesC           = "machines"
 	modelsC             = "models"
 	modelEntityRefsC    = "modelEntityRefs"
 	modelusersC         = "modelusers"
 	permissionsC        = "permissions"
+	providerIDsC        = "providerIDs"
 	relationsC          = "relations"
 	refcountsC          = "refcounts"
 	resourcesC          = "resources"
@@ -55,6 +58,7 @@ const (
 	sequenceC           = "sequence"
 	settingsC           = "settings"
 	settingsrefsC       = "settingsrefs"
+	spacesC             = "spaces"
 	statusesC           = "statuses"
 	statusHistoryC      = "statuseshistory"
 	storageconstraintsC = "storageconstraints"
@@ -613,7 +617,16 @@ func otherSchemaUpgrades(context *dbUpgradeContext) error {
 	if err := upgradeCloudImageMetadata(context); err != nil {
 		return errors.Trace(err)
 	}
+	if err := upgradeSpaces(context); err != nil {
+		return errors.Trace(err)
+	}
 	if err := upgradeSubnets(context); err != nil {
+		return errors.Trace(err)
+	}
+	if err := upgradeLinkLayerDevices(context); err != nil {
+		return errors.Trace(err)
+	}
+	if err := upgradeIPAddresses(context); err != nil {
 		return errors.Trace(err)
 	}
 
@@ -1004,6 +1017,51 @@ func upgradeMachinesCollection(context *dbUpgradeContext) error {
 	return errors.Trace(runner.RunTransaction(ops))
 }
 
+func upgradeSpaces(context *dbUpgradeContext) error {
+	context.Info("Updating spaces")
+	coll := context.db.GetCollection(spacesC)
+
+	var ops []txn.Op
+
+	var doc bson.D
+	iter := coll.Find(nil).Iter()
+	defer iter.Close()
+	for iter.Next(&doc) {
+
+		modelUUID := getStringField(doc, "model-uuid")
+		providerID := getStringField(doc, "providerid")
+
+		if strings.HasPrefix(providerID, modelUUID) {
+			providerID = providerID[len(modelUUID)+1:]
+			ops = append(
+				ops,
+				txn.Op{
+					C:      spacesC,
+					Id:     getStringField(doc, "_id"),
+					Assert: txn.DocExists,
+					Update: bson.D{
+						{"$set", bson.D{{"providerid", providerID}}},
+					},
+				},
+				txn.Op{
+					C:      providerIDsC,
+					Id:     fmt.Sprintf("%s:space:%s", modelUUID, providerID),
+					Assert: txn.DocMissing,
+					Insert: bson.M{
+						"model-uuid": modelUUID,
+					},
+				},
+			)
+		}
+	}
+	if err := iter.Err(); err != nil {
+		return errors.Annotatef(err, "failed to read spaces")
+	}
+
+	runner := context.db.TransactionRunner(context.cmdCtx, context.live)
+	return errors.Trace(runner.RunTransaction(ops))
+}
+
 func upgradeSubnets(context *dbUpgradeContext) error {
 	context.Info("Updating subnets")
 	coll := context.db.GetCollection(subnetsC)
@@ -1030,11 +1088,109 @@ func upgradeSubnets(context *dbUpgradeContext) error {
 						{"$set", bson.D{{"providerid", providerID}}},
 					},
 				},
+				txn.Op{
+					C:      providerIDsC,
+					Id:     fmt.Sprintf("%s:subnet:%s", modelUUID, providerID),
+					Assert: txn.DocMissing,
+					Insert: bson.M{
+						"model-uuid": modelUUID,
+					},
+				},
 			)
 		}
 	}
 	if err := iter.Err(); err != nil {
 		return errors.Annotatef(err, "failed to read subnets")
+	}
+
+	runner := context.db.TransactionRunner(context.cmdCtx, context.live)
+	return errors.Trace(runner.RunTransaction(ops))
+}
+
+func upgradeLinkLayerDevices(context *dbUpgradeContext) error {
+	context.Info("Updating link layer devices")
+	coll := context.db.GetCollection(linklayerdevicesC)
+
+	var ops []txn.Op
+
+	var doc bson.D
+	iter := coll.Find(nil).Iter()
+	defer iter.Close()
+	for iter.Next(&doc) {
+
+		modelUUID := getStringField(doc, "model-uuid")
+		providerID := getStringField(doc, "providerid")
+
+		if strings.HasPrefix(providerID, modelUUID) {
+			providerID = providerID[len(modelUUID)+1:]
+			ops = append(
+				ops,
+				txn.Op{
+					C:      linklayerdevicesC,
+					Id:     getStringField(doc, "_id"),
+					Assert: txn.DocExists,
+					Update: bson.D{
+						{"$set", bson.D{{"providerid", providerID}}},
+					},
+				},
+				txn.Op{
+					C:      providerIDsC,
+					Id:     fmt.Sprintf("%s:linklayerdevice:%s", modelUUID, providerID),
+					Assert: txn.DocMissing,
+					Insert: bson.M{
+						"model-uuid": modelUUID,
+					},
+				},
+			)
+		}
+	}
+	if err := iter.Err(); err != nil {
+		return errors.Annotatef(err, "failed to link layer devices")
+	}
+
+	runner := context.db.TransactionRunner(context.cmdCtx, context.live)
+	return errors.Trace(runner.RunTransaction(ops))
+}
+
+func upgradeIPAddresses(context *dbUpgradeContext) error {
+	context.Info("Updating ip.addresses")
+	coll := context.db.GetCollection(ipAddressesC)
+
+	var ops []txn.Op
+
+	var doc bson.D
+	iter := coll.Find(nil).Iter()
+	defer iter.Close()
+	for iter.Next(&doc) {
+
+		modelUUID := getStringField(doc, "model-uuid")
+		providerID := getStringField(doc, "providerid")
+
+		if strings.HasPrefix(providerID, modelUUID) {
+			providerID = providerID[len(modelUUID)+1:]
+			ops = append(
+				ops,
+				txn.Op{
+					C:      ipAddressesC,
+					Id:     getStringField(doc, "_id"),
+					Assert: txn.DocExists,
+					Update: bson.D{
+						{"$set", bson.D{{"providerid", providerID}}},
+					},
+				},
+				txn.Op{
+					C:      providerIDsC,
+					Id:     fmt.Sprintf("%s:address:%s", modelUUID, providerID),
+					Assert: txn.DocMissing,
+					Insert: bson.M{
+						"model-uuid": modelUUID,
+					},
+				},
+			)
+		}
+	}
+	if err := iter.Err(); err != nil {
+		return errors.Annotatef(err, "failed to read ip.addresses")
 	}
 
 	runner := context.db.TransactionRunner(context.cmdCtx, context.live)
