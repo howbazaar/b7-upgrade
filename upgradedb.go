@@ -326,7 +326,8 @@ func updateController(context *dbUpgradeContext) error {
 
 	context.cloud = controllerSettings.Settings["type"].(string)
 	context.owner = controllerModel.Owner
-	context.credential = fmt.Sprintf("%s#%s#%s", context.cloud, context.owner, context.cloud)
+	credentialID := fmt.Sprintf("%s#%s#%s", context.cloud, context.owner, context.cloud)
+	context.credential = fmt.Sprintf("%s/%s/%s", context.cloud, context.owner, context.cloud)
 	cloud := rc.CloudDoc{
 		Name: context.cloud,
 		Type: context.cloud,
@@ -370,7 +371,7 @@ func updateController(context *dbUpgradeContext) error {
 		Insert: cloud,
 	}, {
 		C:      cloudCredentialsC,
-		Id:     context.credential,
+		Id:     credentialID,
 		Assert: txn.DocMissing,
 		Insert: credentails,
 	}, createSettingsOp("controllers", "controllerSettings", settings), {
