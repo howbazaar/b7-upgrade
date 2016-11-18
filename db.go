@@ -120,14 +120,14 @@ func (r *liveRunner) ResumeTransactions() error {
 
 // Only supports the RunTransaction method, all others panic.
 func (r *liveRunner) RunTransaction(ops []txn.Op) error {
+	logger.Debugf("RunTransaction: \n%# v", pretty.Formatter(ops))
 	if r.live {
 		err := r.runner.RunTransaction(ops)
 		if err != nil {
-			logger.Errorf("RunTransaction: %s\n%# v", err, pretty.Formatter(ops))
+			logger.Errorf("RunTransaction: %s", err)
 		}
 		return err
 	}
-	logger.Debugf("RunTransaction: \n%# v", pretty.Formatter(ops))
 	return nil
 }
 
