@@ -469,7 +469,7 @@ func updateModels(context *dbUpgradeContext) error {
 
 		switch context.cloud {
 		case "lxd":
-			removed.Union(set.NewStrings(
+			removed = removed.Union(set.NewStrings(
 				"client-cert",
 				"client-key",
 				"namespace",
@@ -477,7 +477,7 @@ func updateModels(context *dbUpgradeContext) error {
 				"server-cert",
 			))
 		case "maas":
-			removed.Union(set.NewStrings(
+			removed = removed.Union(set.NewStrings(
 				"maas-server",
 				"maas-oauth",
 				"maas-agent-name",
