@@ -125,28 +125,8 @@ func (c *upgrade) upgradeDB(ctx *cmd.Context) error {
 		return err
 	}
 
-	ctx.Infof("Generated new controller UUID: %s", context.controllerUUID)
-
-	if err := updateController(context); err != nil {
-		return errors.Trace(err)
-	}
-	if err := updateModels(context); err != nil {
-		return errors.Trace(err)
-	}
-
-	if err := renameServiceToApplication(context); err != nil {
-		return errors.Trace(err)
-	}
-
-	if err := otherSchemaUpgrades(context); err != nil {
-		return errors.Trace(err)
-	}
-
-	if err := updateAgentTools(context); err != nil {
-		return errors.Trace(err)
-	}
-
 	// Drop all indices
+	ctx.Infof("Drop non-id indices early")
 	collections, err := db.Collections()
 	if err != nil {
 		return errors.Trace(err)
@@ -166,6 +146,27 @@ func (c *upgrade) upgradeDB(ctx *cmd.Context) error {
 				col.DropIndexName(idx.Name)
 			}
 		}
+	}
+
+	ctx.Infof("Generated new controller UUID: %s", context.controllerUUID)
+
+	if err := updateController(context); err != nil {
+		return errors.Trace(err)
+	}
+	if err := updateModels(context); err != nil {
+		return errors.Trace(err)
+	}
+
+	if err := renameServiceToApplication(context); err != nil {
+		return errors.Trace(err)
+	}
+
+	if err := otherSchemaUpgrades(context); err != nil {
+		return errors.Trace(err)
+	}
+
+	if err := updateAgentTools(context); err != nil {
+		return errors.Trace(err)
 	}
 
 	if !c.live {
