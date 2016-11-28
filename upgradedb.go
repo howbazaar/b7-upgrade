@@ -728,11 +728,13 @@ func updateUnits(context *dbUpgradeContext) error {
 	coll := context.db.GetCollection(unitC)
 
 	var ops []txn.Op
+	updated := time.Now().UnixNano()
 
 	var doc bson.M
 	iter := coll.Find(nil).Iter()
 	defer iter.Close()
 	for iter.Next(&doc) {
+		workloadStatusID := fmt.Sprintf("%s:u#%s#charm#sat#workload-version", doc["model-uuid"], doc["name"])
 		ops = append(ops, txn.Op{
 			C:      unitC,
 			Id:     doc["_id"],
@@ -745,6 +747,14 @@ func updateUnits(context *dbUpgradeContext) error {
 					{"publicaddress", nil},
 					{"service", nil},
 				}},
+			},
+		}, txn.Op{
+			C:      statusesC,
+			Id:     workloadStatusID,
+			Assert: txn.DocMissing,
+			Update: bson.M{
+				"status":  "unknown",
+				"updated": updated,
 			},
 		})
 	}
