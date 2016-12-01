@@ -752,7 +752,7 @@ func updateUnits(context *dbUpgradeContext) error {
 			C:      statusesC,
 			Id:     workloadStatusID,
 			Assert: txn.DocMissing,
-			Update: bson.M{
+			Insert: bson.M{
 				"status":  "unknown",
 				"updated": updated,
 			},
