@@ -556,6 +556,9 @@ func renameServiceToApplication(context *dbUpgradeContext) error {
 	if err := updateUnits(context); err != nil {
 		return errors.Trace(err)
 	}
+	if err := updateSequences(context); err != nil {
+		return errors.Trace(err)
+	}
 	if err := updateLeases(context); err != nil {
 		return errors.Trace(err)
 	}
@@ -1335,7 +1338,7 @@ func updateStatusHistoryCollection(context *dbUpgradeContext) error {
 	return nil
 }
 
-func updateSequence(context *dbUpgradeContext) error {
+func updateSequences(context *dbUpgradeContext) error {
 	fmt.Fprintln(context.cmdCtx.Stdout, "Updating sequences")
 	sequences := context.db.GetCollection(sequenceC)
 
