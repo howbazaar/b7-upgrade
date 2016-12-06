@@ -34,6 +34,7 @@ const (
 
 	annotationC         = "annotations"
 	applicationC        = "applications"
+	charmsC             = "charms"
 	cleanupsC           = "cleanups"
 	cloudsC             = "clouds"
 	cloudCredentialsC   = "cloudCredentials"
@@ -610,6 +611,9 @@ func renameServiceToApplication(context *dbUpgradeContext) error {
 
 func otherSchemaUpgrades(context *dbUpgradeContext) error {
 	context.Info("Other DB upgrades")
+	if err := upgradeCharms(context); err != nil {
+		return errors.Trace(err)
+	}
 	if err := upgradeUsersCollection(context); err != nil {
 		return errors.Trace(err)
 	}
@@ -927,6 +931,36 @@ func updateResources(context *dbUpgradeContext) error {
 	}
 	if err := iter.Err(); err != nil {
 		return errors.Annotatef(err, "failed to read resources")
+	}
+
+	runner := context.db.TransactionRunner(context.cmdCtx, context.live)
+	return errors.Trace(runner.RunTransaction(ops))
+}
+
+func upgradeCharms(context *dbUpgradeContext) error {
+	context.Info("Updating charms")
+	coll := context.db.GetCollection(charmsC)
+
+	var ops []txn.Op
+
+	var doc bson.M
+	iter := coll.Find(nil).Iter()
+	defer iter.Close()
+	for iter.Next(&doc) {
+		ops = append(
+			ops,
+			txn.Op{
+				C:      charmsC,
+				Id:     doc["_id"],
+				Assert: txn.DocExists,
+				Update: bson.D{
+					{"$set", bson.D{{"life", 0}}},
+				},
+			},
+		)
+	}
+	if err := iter.Err(); err != nil {
+		return errors.Annotatef(err, "failed to read charms")
 	}
 
 	runner := context.db.TransactionRunner(context.cmdCtx, context.live)
